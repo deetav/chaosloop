@@ -4,12 +4,14 @@ from .clock import VirtualClock
 from .exceptions import (
     ChaosloopError,
     Deadlock,
+    ReplayMismatch,
     StepBudgetExceeded,
     TimeBudgetExceeded,
     UnsupportedOperation,
     UnsupportedPython,
 )
-from .schedulers import Candidate, Scheduler, StepEvent
+from .runner import Trial, run, trial
+from .schedulers import Candidate, Fifo, Random, Replay, Scheduler, StepEvent
 from .trace import Step, Trace, Tracer
 
 __version__ = "0.1.0"
@@ -18,6 +20,10 @@ __all__ = [
     "Candidate",
     "ChaosloopError",
     "Deadlock",
+    "Fifo",
+    "Random",
+    "Replay",
+    "ReplayMismatch",
     "Scheduler",
     "Step",
     "StepBudgetExceeded",
@@ -25,7 +31,11 @@ __all__ = [
     "TimeBudgetExceeded",
     "Trace",
     "Tracer",
+    "Trial",
     "UnsupportedOperation",
     "UnsupportedPython",
     "VirtualClock",
+    "run",
+    "trial",
 ]
+
