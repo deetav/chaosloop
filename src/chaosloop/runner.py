@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
 from .clock import VirtualClock
 from .loop import ChaosEventLoop
+from .oracles import (
+    DeadlockOracle,
+    Finding,
+    LivelockOracle,
+    Oracle,
+    OracleBase,
+    Severity,
+    TimeBudgetOracle,
+    UnhandledException,
+)
+from .oracles.base import failure_site
+from .runtime import ErrorInfo, TaskInfo, TraceView
 from .schedulers.base import Scheduler
 from .schedulers.fifo import Fifo
 from .schedulers.random_ import Random
@@ -17,24 +29,80 @@ from .trace import Trace
 
 Scenario = Callable[[], Coroutine[Any, Any, Any]]
 
+DEFAULT_ORACLES: tuple[type[OracleBase], ...] = (
+    UnhandledException,
+    DeadlockOracle,
+    LivelockOracle,
+    TimeBudgetOracle,
+)
 
 class _InvalidScenarioError(TypeError):
     """Separate API misuse from TypeError raised inside legitimate user code."""
 
+class _OracleAbortError(Exception):
+    """Internal control flow only; Trial exposes the Finding instead."""
+
+class _RunView:
+
+    def __init__(self, loop: ChaosEventLoop, trace: Trace) -> None:
+        self.__loop = loop
+        self.__trace = trace
+
+    @property
+    def step(self) -> int:
+        return self.__loop.step
+
+    @property
+    def vtime(self) -> float:
+        return self.__loop.vtime
+
+    @property
+    def ready_count(self) -> int:
+        return self.__loop.ready_count
+
+    @property
+    def timers_pending(self) -> int:
+        return self.__loop.timers_pending
+
+    def pending_tasks(self) -> tuple[TaskInfo, ...]:
+        return self.__loop.task_snapshots()
+
+    def trace(self) -> TraceView:
+        return TraceView(tuple(self.__trace.steps))
+
+    def captured_errors(self) -> tuple[ErrorInfo, ...]:
+        out = []
+        for context in self.__loop.exceptions:
+            error = context.get("exception")
+            if isinstance(error, BaseException):
+                out.append(ErrorInfo(type(error).__name__, str(error), failure_site(error)))
+            else:
+                out.append(
+                    ErrorInfo("RuntimeError", str(context.get("message", "callback failed")), None)
+                )
+        return tuple(out)
 
 @dataclass(frozen=True)
 class Trial:
     """One outcome. Step and time counts describe the scenario, before cleanup"""
-
     seed: int | None
-    ok: bool
     value: Any
     error: BaseException | None
     trace: Trace
     steps: int
     vtime: float
+    findings: tuple[Finding, ...] = ()
     max_steps: int = 1_000_000
     max_time: float | None = None
+    custom_checks: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and not any(f.severity is Severity.FAILURE for f in self.findings)
+
+    @property
+    def warnings(self) -> tuple[Finding, ...]:
+        return tuple(f for f in self.findings if f.severity is Severity.WARNING)
 
     @property
     def decisions(self) -> list[int]:
@@ -44,32 +112,44 @@ class Trial:
     def digest(self) -> str:
         return self.trace.digest()
 
+    def reproduction(self) -> str:
+        bounds = f", max_steps={self.max_steps}, max_time={self.max_time!r}"
+        checks = ", oracles=oracles, invariants=invariants" if self.custom_checks else ""
+        if self.seed is not None and self.trace.scheduler == "Random":
+            schedule = f"seed={self.seed}"
+        else:
+            schedule = f"scheduler=chaosloop.Replay({self.decisions!r}, strict=True)"
+        return f"chaosloop.trial(scenario, {schedule}{bounds}{checks})"
+
     def report(self) -> str:
-        """Explain the outcome and give a reproducible Python expression"""
-        status = "PASSED" if self.ok else "FAILED"
-        lines = [f"{status}  seed={self.seed}  scheduler={self.trace.scheduler}"]
+        lines = [
+            f"{'PASSED' if self.ok else 'FAILED'}  seed={self.seed}  "
+            f"scheduler={self.trace.scheduler}"
+        ]
         if self.error is not None:
-            lines.extend(["", f"  {type(self.error).__name__}: {self.error}"])
-        deviations = sum(choice != 0 for choice in self.decisions)
+            lines.append(f"  {type(self.error).__name__}: {self.error}")
+        for finding in self.findings:
+            lines.append(f"  [{finding.severity.value}] {finding.oracle}: {finding.message}")
+            if finding.site:
+                lines.append(f"    at {finding.site}")
+            if finding.detail:
+                lines.append(finding.detail)
+        deviations = sum(d != 0 for d in self.decisions)
         lines.extend(
             [
-                "",
                 f"  {deviations} deviations from the default schedule, {self.steps} steps",
                 f"  virtual time={self.vtime:g}; digest={self.digest}",
                 "",
                 self.trace.render(),
                 "",
+                f"Reproduce: {self.reproduction()}",
+                "Use the same scenario, inputs, code, Python, and oracle/invariant configuration.",
             ]
         )
-        bounds = f", max_steps={self.max_steps}, max_time={self.max_time!r}"
-        if self.seed is not None and self.trace.scheduler == "Random":
-            lines.append(f"Reproduce: chaosloop.trial(scenario, seed={self.seed}{bounds})")
-        else:
+        if self.custom_checks:
             lines.append(
-                "Reproduce: chaosloop.trial(scenario, "
-                f"scheduler=chaosloop.Replay({self.decisions!r}, strict=True){bounds})"
+                "Here oracles and invariants are the original explicit arguments (use () if empty)."
             )
-        lines.append("Use the same scenario factory, inputs, code, and Python version.")
         return "\n".join(lines)
 
 
@@ -170,7 +250,6 @@ def _execute(
         )
     return Trial(
         seed=actual_seed,
-        ok=error is None,
         value=value if error is None else None,
         error=error,
         trace=trace,
@@ -210,6 +289,7 @@ def trial(
     scheduler: Scheduler | None = None,
     max_steps: int = 1_000_000,
     max_time: float | None = None,
+    oracles: Sequence[Oracle] | None = None,
 ) -> Trial:
     """Invoke a factory once and capture scenario failure; each trial gets a new loop"""
     if not callable(scenario):

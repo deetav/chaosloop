@@ -9,8 +9,10 @@ import asyncio
 import heapq
 import itertools
 import math
+from collections import deque
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from contextvars import Context
+from dataclasses import replace
 from typing import Any, NoReturn
 
 from .clock import VirtualClock
@@ -18,13 +20,17 @@ from .compat import (
     callback_label,
     check_supported,
     coro_location,
+    describe_await,
     handle_state,
+    is_completion_callback,
     loop_state,
     register_asyncgen,
     task_of,
     unobserved_exception,
+    user_coro_location,
 )
 from .exceptions import Deadlock, StepBudgetExceeded, UnsupportedOperation
+from .runtime import TaskInfo
 from .schedulers.base import Candidate, Scheduler, StepEvent
 from .trace import Step, Trace
 
@@ -69,8 +75,8 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         self._clock = clock if clock is not None else VirtualClock()
         self._trace = trace if trace is not None else Trace()
         self._scheduler = scheduler
-        self._max_steps = max_steps
         self._step_hook = step_hook
+        self._max_steps = max_steps
         self._steps = 0
         self._recording = True
         self._cleanup_steps = 0
@@ -122,6 +128,8 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         if kwargs.get("eager_start"):
             _unsupported("eager task execution outside scheduler decisions")
         task = super().create_task(coro, name=name, context=context, **kwargs)
+        # Some 3.13 patch releases call task.set_name(None) AFTER the factory,
+        # turning the name into the string 'None'. Restore our default here.
         if name is None:
             task.set_name(self._identity(task))
         return task
@@ -196,6 +204,8 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
 
         chosen = candidates[choice]
         handle = state._ready[chosen.index]
+        task = task_of(handle)
+        user_before = user_coro_location(task) if task is not None else None
         del state._ready[chosen.index]
         self._turn_pending.pop(id(handle), None)
         if self._recording:
@@ -214,10 +224,15 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
             )
         state._current_handle = handle
         try:
-            handle_state(handle)._run()
+            handle_state(handle)._run()  # Handle._run preserves its contextvars context.
         finally:
             state._current_handle = None
         if self._recording:
+            if self._step_hook is not None:
+                # Oracles check the state AFTER this callback. Their location is
+                # the new user suspension site, not asyncio's sleep implementation.
+                location = (user_coro_location(task) if task is not None else None) or user_before
+                self._step_hook(replace(self._trace.steps[-1], location=location))
             self._scheduler.observe(
                 StepEvent(
                     step=self._steps,
@@ -257,6 +272,11 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         self._recording = False
         self._clock.max_time = None
         self._turn_pending.clear()
+        # A hook can abort just after the main task finishes, leaving its stop
+        # callback already queued. Do not let that stale callback stop the NEXT
+        # run_until_complete before its cleanup coroutine has even started.
+        state = loop_state(self)
+        state._ready = deque(h for h in state._ready if not is_completion_callback(h))
         self._candidates()
         self.leftover_tasks = tuple(
             identity for task, identity in self._tasks.items() if not task.done()
@@ -265,6 +285,39 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
     def pending_tasks(self) -> list[asyncio.Task[Any]]:
         """Creation/discovery order, never asyncio.all_tasks() set iteration."""
         return [task for task in self._tasks if not task.done()]
+
+    @property
+    def step(self) -> int:
+        return self._steps
+
+    @property
+    def vtime(self) -> float:
+        return self._clock.now
+
+    @property
+    def ready_count(self) -> int:
+        return sum(not handle.cancelled() for handle in loop_state(self)._ready)
+
+    @property
+    def timers_pending(self) -> int:
+        return sum(not handle.cancelled() for handle in loop_state(self)._scheduled)
+
+    def task_snapshots(self) -> tuple[TaskInfo, ...]:
+        # Discover never-started tasks without iterating asyncio.all_tasks' set.
+        self._candidates()
+        snapshots = [
+            TaskInfo(
+                t.get_name(),
+                t.done(),
+                t.cancelled(),
+                user_coro_location(t),
+                describe_await(t),
+                identity,
+            )
+            for t, identity in self._tasks.items()
+            if not t.done()
+        ]
+        return tuple(sorted(snapshots, key=lambda t: (t.name, t.task_id)))
 
     def _asyncgen_firstiter_hook(self, agen: AsyncGenerator[Any, Any]) -> None:
         # Retain generators so garbage collection cannot schedule finalizers at

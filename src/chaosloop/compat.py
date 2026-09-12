@@ -8,6 +8,8 @@ import os
 import sys
 from collections import deque
 from collections.abc import AsyncGenerator, Callable
+from functools import lru_cache
+from pathlib import Path
 from types import FrameType
 from typing import Any, Protocol, cast
 
@@ -155,3 +157,40 @@ def register_asyncgen(loop: asyncio.AbstractEventLoop, agen: AsyncGenerator[Any,
     """Delegate to the stock hook through the explicit private-API boundary."""
     hook = cast(Callable[..., None], cast(Any, asyncio.BaseEventLoop)._asyncgen_firstiter_hook)
     hook(loop, agen)
+
+
+def user_coro_location(task: asyncio.Task[Any]) -> str | None:
+    """Deepest suspended USER frame, skipping asyncio and this installed package."""
+    current: Any = task.get_coro()
+    seen: set[int] = set()
+    location = None
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        frame = getattr(current, "cr_frame", None) or getattr(current, "gi_frame", None)
+        if frame is not None:
+            basename = _user_basename(frame.f_code.co_filename)
+            if basename is not None:
+                location = f"{basename}:{frame.f_lineno}"
+        current = getattr(current, "cr_await", None) or getattr(current, "gi_yieldfrom", None)
+    return location
+
+
+def describe_await(task: asyncio.Task[Any]) -> str | None:
+    """A stable description, never repr(Future) with an address or state dump."""
+    awaited = getattr(task.get_coro(), "cr_await", None)
+    return type(awaited).__name__ if awaited is not None else None
+
+
+def is_completion_callback(handle: asyncio.Handle) -> bool:
+    """Identify a queued run_until_complete stop left behind by hook abort."""
+    return handle_state(handle)._callback is cast(Any, asyncio.base_events)._run_until_complete_cb
+
+
+_USER_ROOTS = (Path(__file__).resolve().parent, Path(asyncio.__file__).resolve().parent)
+
+
+@lru_cache(maxsize=4096)
+def _user_basename(filename: str) -> str | None:
+    """Cache pure path classification; only the result, never cache order, is used."""
+    path = Path(filename).resolve()
+    return None if any(path.is_relative_to(root) for root in _USER_ROOTS) else path.name

@@ -4,8 +4,6 @@ from .clock import VirtualClock
 from .exceptions import (
     ChaosloopError,
     Deadlock,
-    OracleExecutionError,
-    OracleFailure,
     ReplayMismatch,
     StepBudgetExceeded,
     TimeBudgetExceeded,
@@ -16,13 +14,14 @@ from .runner import Trial, run, trial
 from .schedulers import Candidate, Fifo, Random, Replay, Scheduler, StepEvent
 from .trace import Step, Trace, Tracer
 
+__version__ = "0.2.0"
+
+
 __all__ = [
     "Candidate",
     "ChaosloopError",
     "Deadlock",
     "Fifo",
-    "OracleExecutionError",
-    "OracleFailure",
     "Random",
     "Replay",
     "ReplayMismatch",
@@ -41,11 +40,45 @@ __all__ = [
     "trial",
 ]
 
-from .oracles import Finding, RunContext, Severity
+from .exceptions import OracleExecutionError, OracleFailure
+from .oracles import (
+    DeadlockOracle,
+    Finding,
+    LivelockOracle,
+    Oracle,
+    OracleBase,
+    Outcome,
+    RunContext,
+    Severity,
+    TaskInfo,
+    TimeBudgetOracle,
+    UnhandledException,
+)
 
 __all__ += [
+    "Bucket",
+    "Corpus",
+    "CorpusEntry",
+    "DeadlockOracle",
     "Finding",
+    "FuzzResult",
+    "LivelockOracle",
+    "Oracle",
+    "OracleBase",
+    "OracleExecutionError",
+    "OracleFailure",
+    "Outcome",
+    "Progress",
     "RunContext",
     "Severity",
+    "TaskInfo",
+    "TaskLeak",
+    "TimeBudgetOracle",
+    "UnhandledException",
+    "UnretrievedException",
+    "bucket_failures",
+    "default_progress",
+    "fuzz",
+    "invariant",
 ]
 

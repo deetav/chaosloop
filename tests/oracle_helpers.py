@@ -1,7 +1,10 @@
+from dataclasses import dataclass
+
 from chaosloop import Step
 from chaosloop.runtime import ErrorInfo, TaskInfo, TraceView
 
 
+@dataclass(frozen=True)
 class Context:
     step: int = 3
     vtime: float = 0.0
