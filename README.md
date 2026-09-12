@@ -42,3 +42,35 @@ if not result.ok:
     )
     assert replayed.digest == result.digest
     
+
+``````
+
+
+race.py
+``````
+stock asyncio: 0/1000 failures
+chaosloop fifO: 0/1000 failures
+chaosloop seeds: 46/200 failures
+
+FAILED  seed=2  scheduler=Random
+
+  AssertionError: changed under me: 0 -> 1
+
+  3 deviations from the default schedule, 9 steps
+  virtual time=0; digest=da82f56d189fa0f8
+
+ step      vtime  task          action                                    at
+    1      0.000  task-1        task_step<task-1>                         runner.py:98
+    2      0.000  task-2        task_step<task-2>                         race.py:12
+    3      0.000  task-3        task_step<task-3>                         race.py:17
+    4      0.000  task-3        task_step<task-3>  ← chose #1 of 2        tasks.py:702
+    5      0.000  task-2        task_step<task-2>                         tasks.py:702
+    6      0.000  -             gather.<locals>._done_callback  ← chose #1 of 2  
+    7      0.000  task-1        task_wakeup<task-1>  ← chose #1 of 2      race.py:21
+    8      0.000  -             gather.<locals>._done_callback            
+    9      0.000  -             _run_until_complete_cb                    
+3 deviations from default in 9 steps
+
+Reproduce: chaosloop.trial(scenario, seed=2, max_steps=1000000, max_time=None)
+Use the same scenario factory, inputs, code, and Python version.
+Verified strict replay: da82f56d189fa0f8
