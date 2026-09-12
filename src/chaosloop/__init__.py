@@ -1,5 +1,6 @@
 """chaosloop: deterministic scheduler fuzzing for pure-async asyncio programs"""
 
+
 from .clock import VirtualClock
 from .exceptions import (
     ChaosloopError,
@@ -15,7 +16,6 @@ from .schedulers import Candidate, Fifo, Random, Replay, Scheduler, StepEvent
 from .trace import Step, Trace, Tracer
 
 __version__ = "0.2.0"
-
 
 __all__ = [
     "Candidate",
@@ -41,9 +41,12 @@ __all__ = [
 ]
 
 from .exceptions import OracleExecutionError, OracleFailure
+from .invariants import invariant
 from .oracles import (
     DeadlockOracle,
     Finding,
+    Invariant,
+    InvariantOracle,
     LivelockOracle,
     Oracle,
     OracleBase,
@@ -62,6 +65,8 @@ __all__ += [
     "DeadlockOracle",
     "Finding",
     "FuzzResult",
+    "Invariant",
+    "InvariantOracle",
     "LivelockOracle",
     "Oracle",
     "OracleBase",
