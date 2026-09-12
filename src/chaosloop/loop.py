@@ -61,6 +61,7 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         clock: VirtualClock | None = None,
         trace: Trace | None = None,
         max_steps: int = 1_000_000,
+        step_hook: Callable[[Step], None] | None = None,
     ) -> None:
         check_supported()
         if type(max_steps) is not int or max_steps <= 0:
@@ -69,6 +70,7 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         self._trace = trace if trace is not None else Trace()
         self._scheduler = scheduler
         self._max_steps = max_steps
+        self._step_hook = step_hook
         self._steps = 0
         self._recording = True
         self._cleanup_steps = 0

@@ -4,6 +4,8 @@ from .clock import VirtualClock
 from .exceptions import (
     ChaosloopError,
     Deadlock,
+    OracleExecutionError,
+    OracleFailure,
     ReplayMismatch,
     StepBudgetExceeded,
     TimeBudgetExceeded,
@@ -14,13 +16,13 @@ from .runner import Trial, run, trial
 from .schedulers import Candidate, Fifo, Random, Replay, Scheduler, StepEvent
 from .trace import Step, Trace, Tracer
 
-__version__ = "0.1.0"
-
 __all__ = [
     "Candidate",
     "ChaosloopError",
     "Deadlock",
     "Fifo",
+    "OracleExecutionError",
+    "OracleFailure",
     "Random",
     "Replay",
     "ReplayMismatch",
@@ -37,5 +39,13 @@ __all__ = [
     "VirtualClock",
     "run",
     "trial",
+]
+
+from .oracles import Finding, RunContext, Severity
+
+__all__ += [
+    "Finding",
+    "RunContext",
+    "Severity",
 ]
 

@@ -21,3 +21,9 @@ class TimeBudgetExceeded(ChaosloopError):
 
 class ReplayMismatch(ChaosloopError):
     """A strict replay cannot apply its next recorded scheduling decision."""
+
+class OracleFailure(ChaosloopError):
+    """run() detected a FAILURE finding without a direct scenario exception."""
+
+class OracleExecutionError(ChaosloopError):
+    """An oracle implementation raised instead of returning a finding."""
