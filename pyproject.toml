@@ -12,6 +12,9 @@ license = "MIT"
 keywords = ["asyncio", "testing", "concurrency", "fuzzing", "deterministic"]
 dependencies = []
 
+[project.scripts]
+chaosloop = "chaosloop.cli.main:main"
+
 [project.optional-dependencies]
 cli = ["rich>=13"]
 

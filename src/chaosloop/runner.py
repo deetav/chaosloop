@@ -130,7 +130,7 @@ class Trial:
             schedule = f"scheduler=chaosloop.Replay({self.decisions!r}, strict=True)"
         return f"chaosloop.trial(scenario, {schedule}{bounds}{checks})"
 
-    def report(self) -> str:
+    def report(self, *, trace_limit: int | None = None, show_trace: bool = True) -> str:
         lines = [
             f"{'PASSED' if self.ok else 'FAILED'}  seed={self.seed}  "
             f"scheduler={self.trace.scheduler}"
@@ -149,7 +149,7 @@ class Trial:
                 f"  {deviations} deviations from the default schedule, {self.steps} steps",
                 f"  virtual time={self.vtime:g}; digest={self.digest}",
                 "",
-                self.trace.render(),
+                self.trace.render(limit=trace_limit) if show_trace else "",
                 "",
                 f"Reproduce: {self.reproduction()}",
                 "Use the same scenario, inputs, code, Python, and oracle/invariant configuration.",

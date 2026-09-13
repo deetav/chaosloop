@@ -116,6 +116,7 @@ class FuzzResult:
     corpus_still_failing: int = 0 #same failure still reproduces
     corpus_forgotten: int = 0 # ola failure passes
     corpus_changed: int = 0 # replay fails with different failure
+    corpus_recorded: int = 0
 
     @property
     def ok(self) -> bool:
@@ -298,7 +299,7 @@ def fuzz(
         for finding in _failure_findings(run):
             distinct.add(finding.signature)
             if store is not None:
-                store.record(
+                recorded = store.record(
                     CorpusEntry(
                         result.scenario,
                         finding.signature,
@@ -310,6 +311,7 @@ def fuzz(
                         datetime.now(UTC).isoformat(),
                     )
                 )
+                result.corpus_recorded += int(recorded)
 
     try:
         entries = store.load(result.scenario) if store is not None and not timed_out() else []
