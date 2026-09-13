@@ -3,29 +3,37 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from . import invariants as _inv
 from .clock import VirtualClock
+from .exceptions import OracleExecutionError, OracleFailure
 from .loop import ChaosEventLoop
 from .oracles import (
     DeadlockOracle,
     Finding,
+    Invariant,
+    InvariantOracle,
     LivelockOracle,
     Oracle,
     OracleBase,
+    Outcome,
+    RunContext,
     Severity,
     TimeBudgetOracle,
     UnhandledException,
 )
 from .oracles.base import failure_site
+from .oracles.outcome import CONTROL_ERRORS
 from .runtime import ErrorInfo, TaskInfo, TraceView
 from .schedulers.base import Scheduler
 from .schedulers.fifo import Fifo
 from .schedulers.random_ import Random
-from .trace import Trace
+from .trace import Step, Trace
 
 Scenario = Callable[[], Coroutine[Any, Any, Any]]
 
@@ -35,6 +43,7 @@ DEFAULT_ORACLES: tuple[type[OracleBase], ...] = (
     LivelockOracle,
     TimeBudgetOracle,
 )
+
 
 class _InvalidScenarioError(TypeError):
     """Separate API misuse from TypeError raised inside legitimate user code."""
@@ -175,6 +184,27 @@ def _check_not_running() -> None:
     raise RuntimeError("chaosloop.run/trial cannot run inside an already running event loop")
 
 
+def _build_oracles(
+    oracles: Sequence[Oracle] | None, invariants: Sequence[Invariant]
+) -> list[Oracle]:
+    if oracles is None:
+        selected: list[Oracle] = [make() for make in DEFAULT_ORACLES]
+        selected.append(InvariantOracle())  # Makes in-scenario registration work by default.
+    else:
+        selected = [copy.deepcopy(oracle) for oracle in oracles]
+    if any(not isinstance(oracle, Oracle) for oracle in selected):
+        raise TypeError("oracles must implement name, on_start, on_step, and on_finish")
+    detectors = [o for o in selected if isinstance(o, InvariantOracle)]
+    if len(detectors) > 1:
+        raise ValueError("supply at most one InvariantOracle")
+    if invariants:
+        if detectors:
+            detectors[0].configured += tuple(invariants)
+        else:
+            selected.append(InvariantOracle(invariants))
+    return selected
+
+
 async def _invoke(scenario: Scenario) -> Any:
     # Construct inside the running loop: factories may create loop-bound state.
     coroutine = scenario()
@@ -209,54 +239,106 @@ def _execute(
     scheduler: Scheduler | None,
     max_steps: int,
     max_time: float | None,
+    oracles: Sequence[Oracle] | None,
+    invariants: Sequence[Invariant],
 ) -> Trial:
     _check_not_running()
     strategy = _resolve_scheduler(seed, scheduler)
     if type(max_steps) is not int or max_steps <= 0:
         raise ValueError("max_steps must be a positive integer")
     clock = VirtualClock(max_time=max_time)
+    selected = _build_oracles(oracles, invariants)
     actual_seed = strategy.seed if isinstance(strategy, Random) else None
     trace = Trace(seed=actual_seed, scheduler=type(strategy).__name__)
-    loop = ChaosEventLoop(strategy, clock, trace, max_steps)
+    findings: list[Finding] = []
+
+    def call_hook(oracle: Oracle, hook: str, *args: Any) -> Finding | None:
+        try:
+            result = getattr(oracle, hook)(*args)
+            if result is not None and not isinstance(result, Finding):
+                raise TypeError("oracle hook must return Finding or None")
+            return result
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as caught:
+            raise OracleExecutionError(
+                f"{oracle.name}.{hook} raised {type(caught).__name__}: {caught}"
+            ) from caught
+
+    def step_hook(step: Step) -> None:
+        for oracle in selected:
+            finding = call_hook(oracle, "on_step", ctx, step)
+            if finding is not None:
+                findings.append(finding)  # Keep WARNINGs too; they do not abort.
+                if finding.severity is Severity.FAILURE:
+                    raise _OracleAbortError()
+
+    loop = ChaosEventLoop(strategy, clock, trace, max_steps, step_hook=step_hook)
+    ctx: RunContext = _RunView(loop, trace)
+    inv_oracle = next((o for o in selected if isinstance(o, InvariantOracle)), None)
+    token = _inv._bind(loop, inv_oracle)
     value: Any = None
     error: BaseException | None = None
+    main: asyncio.Task[Any] | None = None
+    aborted = False
     try:
-        value = loop.run_until_complete(_invoke(scenario))
+        for oracle in selected:
+            call_hook(oracle, "on_start", ctx)
+        main = loop.create_task(_invoke(scenario))
+        value = loop.run_until_complete(main)
+    except _OracleAbortError:
+        aborted = True
     except BaseException as caught:
-        # Record cancellation and user assertions too. Process-control exceptions
-        # are re-raised AFTER cleanup, so finally blocks still get a chance.
         error = caught
     finally:
         vtime = clock.now
         loop.collect_task_errors()
-        loop.begin_shutdown()
+        completed = (
+            main is not None
+            and main.done()
+            and not aborted
+            and not isinstance(error, CONTROL_ERRORS)
+        )
+        outcome = Outcome(value, error, completed)
+        if not isinstance(error, (KeyboardInterrupt, SystemExit, _InvalidScenarioError)):
+            for oracle in selected:
+                try:
+                    finding = call_hook(oracle, "on_finish", ctx, outcome)
+                    if finding is not None:
+                        findings.append(finding)
+                except BaseException as caught:
+                    if error is None or isinstance(caught, (KeyboardInterrupt, SystemExit)):
+                        error = caught
+        _inv._reset(token)
+        loop.begin_shutdown()  # Hooks and recording stop before any cleanup steps.
         try:
             _shutdown(loop)
-        except BaseException as cleanup_error:
-            if error is None or isinstance(cleanup_error, (KeyboardInterrupt, SystemExit)):
-                error = cleanup_error
+        except BaseException as caught:
+            if error is None or isinstance(caught, (KeyboardInterrupt, SystemExit)):
+                error = caught
         finally:
             loop.collect_task_errors()
             loop.close()
     if isinstance(error, (KeyboardInterrupt, SystemExit, _InvalidScenarioError)):
         raise error
     if error is None and loop.exceptions:
-        context = loop.exceptions[0]
-        captured = context.get("exception")
+        captured = loop.exceptions[0].get("exception")
         error = (
             captured
             if isinstance(captured, BaseException)
-            else RuntimeError(str(context.get("message", "unhandled event loop error")))
+            else RuntimeError(str(loop.exceptions[0].get("message", "unhandled event loop error")))
         )
     return Trial(
-        seed=actual_seed,
-        value=value if error is None else None,
-        error=error,
-        trace=trace,
-        steps=len(trace.steps),
-        vtime=vtime,
-        max_steps=max_steps,
-        max_time=max_time,
+        actual_seed,
+        value if error is None else None,
+        error,
+        trace,
+        len(trace.steps),
+        vtime,
+        tuple(findings),
+        max_steps,
+        max_time,
+        oracles is not None or bool(invariants),
     )
 
 
@@ -267,18 +349,28 @@ def run[T](
     scheduler: Scheduler | None = None,
     max_steps: int = 1_000_000,
     max_time: float | None = None,
+    oracles: Sequence[Oracle] | None = None,
+    invariants: Sequence[Invariant] = (),
 ) -> T:
-    """Run one coroutine and return its value; failures propagate like asyncio.run."""
+    """Return a value, propagate an error, or raise OracleFailure for a finding."""
     if not inspect.iscoroutine(coro):
         raise TypeError("run() expects a coroutine object; use run(main())")
     try:
         result = _execute(
-            lambda: coro, seed=seed, scheduler=scheduler, max_steps=max_steps, max_time=max_time
+            lambda: coro,
+            seed=seed,
+            scheduler=scheduler,
+            max_steps=max_steps,
+            max_time=max_time,
+            oracles=oracles,
+            invariants=invariants,
         )
     finally:
         coro.close()
     if result.error is not None:
         raise result.error
+    if not result.ok:
+        raise OracleFailure(result.report())
     return cast(T, result.value)
 
 
@@ -290,10 +382,22 @@ def trial(
     max_steps: int = 1_000_000,
     max_time: float | None = None,
     oracles: Sequence[Oracle] | None = None,
+    invariants: Sequence[Invariant] = (),
 ) -> Trial:
-    """Invoke a factory once and capture scenario failure; each trial gets a new loop"""
+    """Run fresh work; capture scenario failures and oracle findings.
+
+    None enables fresh defaults including InvariantOracle. An explicit sequence
+    replaces defaults; () leaves direct execution errors active. Predicates and
+    scenario factories must create/use fresh state for each independent trial.
+    """
     if not callable(scenario):
-        raise TypeError("trial() expects a coroutine factory; use trial(main), without parentheses")
+        raise TypeError("trial() expects a coroutine factory; use trial(main)")
     return _execute(
-        scenario, seed=seed, scheduler=scheduler, max_steps=max_steps, max_time=max_time
+        scenario,
+        seed=seed,
+        scheduler=scheduler,
+        max_steps=max_steps,
+        max_time=max_time,
+        oracles=oracles,
+        invariants=invariants,
     )

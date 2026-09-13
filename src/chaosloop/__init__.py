@@ -40,7 +40,9 @@ __all__ = [
     "trial",
 ]
 
+from .corpus import Corpus, CorpusEntry
 from .exceptions import OracleExecutionError, OracleFailure
+from .fuzz import Bucket, FuzzResult, Progress, bucket_failures, default_progress, fuzz
 from .invariants import invariant
 from .oracles import (
     DeadlockOracle,
@@ -54,8 +56,10 @@ from .oracles import (
     RunContext,
     Severity,
     TaskInfo,
+    TaskLeak,
     TimeBudgetOracle,
     UnhandledException,
+    UnretrievedException,
 )
 
 __all__ += [
@@ -86,4 +90,3 @@ __all__ += [
     "fuzz",
     "invariant",
 ]
-
