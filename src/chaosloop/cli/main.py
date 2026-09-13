@@ -23,6 +23,7 @@ from .render import emit_json, fuzz_data, trial_data
 from .replay import SavedSchedule, read_schedule
 from .seeds import parse_seeds
 from .specs import ScenarioLoadError, load_scenario
+from .doctor import diagnose_scenario, diagnose_environment
 
 
 class UsageError(Exception):
@@ -310,6 +311,23 @@ def _trace(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
         human,
     )
 
+def _doctor(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
+    checks = diagnose_environment()
+    if args.spec:
+        checks += diagnose_scenario(
+            load_scenario(args.spec), max_steps=args.max_steps, max_time=args.max_time
+        )
+    code = int(any(not check.ok and not check.warning for check in checks))
+    lines = ["chaosloop doctor"]
+    for check in checks:
+        symbol = "!" if check.warning else "PASS" if check.ok else "FAIL"
+        lines.append(f"  {symbol} {check.check}: {check.message}")
+        if check.fix:
+            lines.append(f"    -> {check.fix}")
+    lines.append("Selected checks only: a clean diagnosis is not a determinism proof.")
+    return code, {"checks": [asdict(check) for check in checks]}, "\n".join(lines)
+
+
 
 def main(argv: list[str] | None = None) -> int:
     """Return 0 clean, 1 findings, 2 usage, 3 load/replay I/O, 4 internal, 130 interrupt.
@@ -333,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
                 "fuzz": _fuzz,
                 "replay": _replay,
                 "trace": _trace,
+                "doctor": _doctor,
             }[args.command](args)
         if machine:
             emit_json(command, exit_code=code, **data)
