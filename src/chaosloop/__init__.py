@@ -41,6 +41,7 @@ __all__ = [
 ]
 
 from .corpus import Corpus, CorpusEntry
+from .decorators import chaos_test
 from .exceptions import OracleExecutionError, OracleFailure
 from .fuzz import Bucket, FuzzResult, Progress, bucket_failures, default_progress, fuzz
 from .invariants import invariant
@@ -86,6 +87,7 @@ __all__ += [
     "UnhandledException",
     "UnretrievedException",
     "bucket_failures",
+    "chaos_test",
     "default_progress",
     "fuzz",
     "invariant",

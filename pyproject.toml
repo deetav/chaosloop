@@ -22,7 +22,7 @@ cli = ["rich>=13"]
 chaosloop = "chaosloop.pytest_plugin"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
+dev = ["pytest>=8", "pytest-asyncio", "pytest-cov", "ruff", "mypy"]
 
 [project.urls]
 Homepage = ""
@@ -49,7 +49,7 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -p pytester"
 markers = [
     "slow: long-running tests, excluded from the default run",
     "nightly: determinism soak tests",
