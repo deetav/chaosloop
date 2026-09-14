@@ -18,6 +18,9 @@ chaosloop = "chaosloop.cli.main:main"
 [project.optional-dependencies]
 cli = ["rich>=13"]
 
+[project.entry-points.pytest11]
+chaosloop = "chaosloop.pytest_plugin"
+
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
 
