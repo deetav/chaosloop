@@ -4,17 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
 import warnings
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 DEFAULT_DIR = Path(".chaosloop")
 FORMAT_VERSION = 1
+
+class LegacyCorpusWarning(RuntimeWarning):
+    """v1 entry usable byt cannot validate recorded task identity"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +31,12 @@ class CorpusEntry:
     site: str | None
     deviations: int
     recorded_at: str
+    task_ids: list[str | None] | None = None
+    format_version: int = FORMAT_VERSION
+    original_deviations: int | None = None
+    max_steps: int = 1_000_000
+    max_time: float | None = None
+    fail_on_task_leak: bool = False
 
     def __post_init__(self) -> None:
         for value in (self.scenario, self.signature, self.message, self.recorded_at):
@@ -50,8 +60,31 @@ class CorpusEntry:
         offset = timestamp.utcoffset()
         if offset is None or offset.total_seconds() != 0:
             raise ValueError("recorded_at must be an ISO 8601 UTC timestamp")
-
+        # The public shape remains a list for easy JSON/replay. Copy the caller's
+        # list so later mutation of that input does not rewrite this entry.
         object.__setattr__(self, "decisions", list(self.decisions))
+        if self.task_ids is not None:
+            if not isinstance(self.task_ids, list) or len(self.task_ids) != len(self.decisions):
+                raise ValueError("task_ids must be a list parallel to decisions")
+            if any(t is not None and (not isinstance(t, str) or not t) for t in self.task_ids):
+                raise ValueError("task_ids must contain nonempty strings or null")
+            object.__setattr__(self, "task_ids", self.task_ids.copy())
+        if type(self.format_version) is not int or self.format_version not in (1, 2):
+            raise ValueError("unsupported corpus format version")
+        if self.original_deviations is not None and (
+            type(self.original_deviations) is not int or self.original_deviations < self.deviations
+        ):
+            raise ValueError("original_deviations must be >= current deviations")
+        if type(self.max_steps) is not int or self.max_steps <= 0:
+            raise ValueError("max_steps must be a positive integer")
+        if self.max_time is not None and (
+            type(self.max_time) not in (int, float)
+            or not math.isfinite(self.max_time)
+            or self.max_time < 0
+        ):
+            raise ValueError("max_time must be finite and nonnegative")
+        if type(self.fail_on_task_leak) is not bool:
+            raise ValueError("fail_on_task_leak must be boolean")
 
 
 def _safe_dirname(scenario: str) -> str:
@@ -63,22 +96,47 @@ def _signature_name(signature: str) -> str:
     return hashlib.sha256(signature.encode()).hexdigest()[:32] + ".json"
 
 
-def _rank(entry: CorpusEntry) -> tuple[int, int, int, tuple[int, ...]]:
+def _rank(entry: CorpusEntry) -> tuple[int, int, int, tuple[int, ...], bool, bool, int]:
     return (
         entry.deviations,
-        entry.seed if entry.seed is not None else 2**63,
+        sum(entry.decisions),
         len(entry.decisions),
         tuple(entry.decisions),
+        entry.task_ids is None,
+        entry.original_deviations is None,
+        entry.seed if entry.seed is not None else 2**63,
     )
 
 
 def _read(path: Path, scenario: str) -> CorpusEntry:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.pop("version", None) != FORMAT_VERSION:
-        raise ValueError("unsupported corpus format version")
-    entry = CorpusEntry(**data)
+    entry = entry_from_data(json.loads(path.read_text(encoding="utf-8")))
     if entry.scenario != scenario or path.name != _signature_name(entry.signature):
         raise ValueError("entry identity does not match its directory/filename")
+    return entry
+
+
+def entry_from_data(raw: Any) -> CorpusEntry:
+    """One defensive decoder shared by the store and CLI file reader."""
+    if not isinstance(raw, dict):
+        raise ValueError("corpus document must be an object")
+    data = dict(raw)
+    version = data.pop("version", None)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("unsupported corpus format version")
+    if data.get("format_version", version) != version:
+        raise ValueError("conflicting corpus format versions")
+    data["format_version"] = version
+    if version == 1:
+        if data.get("task_ids") is not None:
+            raise ValueError("v1 corpus entries cannot contain task identities")
+        data["task_ids"] = None
+    entry = CorpusEntry(**data)
+    if version == 1:
+        warnings.warn(
+            "v1 corpus entry: task identity unavailable; replay fidelity is reduced",
+            LegacyCorpusWarning,
+            stacklevel=2,
+        )
     return entry
 
 
@@ -111,7 +169,7 @@ class Corpus:
     def record(self, entry: CorpusEntry) -> bool:
         """Keep the better exemplar, then atomically replace its JSON file"""
         # Revalidate because the list inside a frozen dataclass is still mutable.
-        entry = CorpusEntry(**asdict(entry))
+        entry = replace(CorpusEntry(**asdict(entry)), format_version=FORMAT_VERSION)
         directory = self._directory(entry.scenario)
         path = directory / _signature_name(entry.signature)
         temp: Path | None = None

@@ -50,7 +50,7 @@ def test_machine_output_is_complete_json(capsys, function, code):
     assert main(["run", MODULE + function, "--json", "--trace-limit", "0"]) == code
     captured = capsys.readouterr()
     data = json.loads(captured.out)
-    assert data["schema"] == 1 and data["chaosloop"] == "0.3.0"
+    assert data["schema"] == 1 and data["chaosloop"] == "0.4.0"
     assert len(data["result"]["trace"]) == data["result"]["steps"] > 0
     if function == "noisy":
         assert "scenario log" in captured.err
@@ -181,7 +181,7 @@ def test_json_plain_values_cycles_and_mappings():
         "[false]",
         "{}",
         '{"version":2}',
-        '{"chaosloop":"0.3.0","schema":99}',
+        '{"chaosloop":"0.4.0","schema":99}',
         '{"decisions":[]}',
     ],
 )

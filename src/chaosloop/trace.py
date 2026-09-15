@@ -107,6 +107,11 @@ class Trace:
         """Return the schedule in the scheduler-independent replay format."""
         return [step.chosen for step in self.steps]
 
+    @property
+    def task_ids(self) -> list[str | None]:
+        """Return the task identity recorded at each step, parallel to decisions."""
+        return [step.task_id for step in self.steps]
+
     def digest(self) -> str:
         """Return a stable 16-character structural fingerprint of the schedule."""
         canonical = json.dumps(

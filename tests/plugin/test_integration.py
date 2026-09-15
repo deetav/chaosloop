@@ -164,7 +164,7 @@ async def test_cases(number):
     assert {entry["scenario"].split("[")[-1] for entry in entries} == {"one]", "two]"}
 
 
-def test_corpus_repro_uses_decisions_and_single_trial(pytester, run_plugin):
+def test_corpus_repro_uses_identity_entry_and_single_trial(pytester, run_plugin):
     pytester.makepyfile(RACE)
     run_plugin().assert_outcomes(failed=1)
     second = run_plugin()
@@ -177,18 +177,17 @@ def test_corpus_repro_uses_decisions_and_single_trial(pytester, run_plugin):
     replay.stdout.fnmatch_lines(["*1 chaos tests; 1 trials;*"])
 
 
-def test_strict_replay_exhaustion_fails(pytester, run_plugin):
+def test_strict_replay_exhaustion_continues_fifo(pytester, run_plugin):
     pytester.makepyfile(PASSING)
     result = run_plugin("--chaos-decisions", "[]")
-    result.assert_outcomes(failed=1)
-    assert "ReplayMismatch" in result.stdout.str()
+    result.assert_outcomes(passed=1)
 
 
 def test_summary_is_reset_between_sessions(pytester, run_plugin):
     pytester.makepyfile(PASSING)
     for _ in range(2):
         result = run_plugin("--chaos-no-corpus", "-v")
-        result.stdout.fnmatch_lines(["*chaosloop 0.3.0:*", "*1 chaos tests; 4 trials;*"])
+        result.stdout.fnmatch_lines(["*chaosloop 0.4.0:*", "*1 chaos tests; 4 trials;*"])
 
 
 def test_corpus_lives_under_rootdir_even_from_child(pytester, run_plugin, monkeypatch):

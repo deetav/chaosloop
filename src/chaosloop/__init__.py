@@ -15,7 +15,7 @@ from .runner import Trial, run, trial
 from .schedulers import Candidate, Fifo, Random, Replay, Scheduler, StepEvent
 from .trace import Step, Trace, Tracer
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Candidate",

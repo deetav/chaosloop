@@ -241,7 +241,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
             max_time=config.max_time,
             oracles=_checks(config.fail_on_task_leak),
         )
-        mismatch = config.decisions is not None and len(run.decisions) != len(config.decisions)
+        mismatch = isinstance(strategy, Replay) and strategy.remaining > 0
         ok = run.ok and not mismatch
         failures = [] if ok else [run]
         observed_warnings = list(run.warnings)
