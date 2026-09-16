@@ -5,4 +5,5 @@
 |    2 | Invalid command, argument combination, or numeric range                               |
 |    3 | Scenario import/factory problem, unreadable/malformed file, or strict replay mismatch |
 |    4 | Unexpected internal CLI exception                                                     |
+|    5 | Hard/unfinished replay divergence, or failed shrink verification; unknown             | 
 |  130 | KeyboardInterrupt                                                                     |

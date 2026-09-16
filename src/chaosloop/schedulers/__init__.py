@@ -3,6 +3,6 @@
 from .base import Candidate, Scheduler, StepEvent
 from .fifo import Fifo
 from .random_ import Random
-from .replay import Replay
+from .replay import Divergence, Replay
 
-__all__ = ["Candidate", "Fifo", "Random", "Replay", "Scheduler", "StepEvent"]
+__all__ = ["Candidate", "Divergence", "Fifo", "Random", "Replay", "Scheduler", "StepEvent"]

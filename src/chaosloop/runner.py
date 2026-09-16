@@ -24,6 +24,7 @@ from .oracles import (
     Outcome,
     RunContext,
     Severity,
+TaskLeak,
     TimeBudgetOracle,
     UnhandledException,
 )
@@ -33,6 +34,7 @@ from .runtime import ErrorInfo, TaskInfo, TraceView
 from .schedulers.base import Scheduler
 from .schedulers.fifo import Fifo
 from .schedulers.random_ import Random
+from .schedulers.replay import Divergence, Replay
 from .trace import Step, Trace
 
 Scenario = Callable[[], Coroutine[Any, Any, Any]]
@@ -104,6 +106,13 @@ class Trial:
     max_steps: int = 1_000_000
     max_time: float | None = None
     custom_checks: bool = False
+    replay_divergences: tuple[Divergence, ...] = ()
+    unused_decisions: int = 0
+    fail_on_task_leak: bool = False
+
+    @property
+    def diverged(self) -> bool:
+        return any(note.hard for note in self.replay_divergences)
 
     @property
     def ok(self) -> bool:
@@ -339,6 +348,9 @@ def _execute(
         max_steps,
         max_time,
         oracles is not None or bool(invariants),
+        tuple(strategy.divergences) if isinstance(strategy, Replay) else (),
+        strategy.remaining if isinstance(strategy, Replay) else 0,
+        any(isinstance(o, TaskLeak) and o.severity is Severity.FAILURE for o in selected),
     )
 
 

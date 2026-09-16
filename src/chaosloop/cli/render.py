@@ -101,3 +101,24 @@ def fuzz_data(result: FuzzResult) -> dict[str, Any]:
 
 def emit_json(command: str, **data: Any) -> None:
     print(json.dumps(envelope(command, **data), ensure_ascii=False, allow_nan=False))
+
+def render_divergences(result: Trial, limit: int = 3) -> str:
+    notable = [note for note in result.replay_divergences if note.kind != "exhausted"]
+    lines = []
+    for note in sorted(notable, key=lambda d: (not d.hard, d.step))[:limit]:
+        lines.append(
+            f"  {'HARD' if note.hard else 'SOFT'} divergence at step {note.step + 1}: "
+            f"{note.kind}; expected {note.expected_task or 'callback position'} "
+            f"at #{note.expected_index}, actual #{note.actual_index} "
+            f"({note.n_candidates} candidates)"
+        )
+    if len(notable) > limit:
+        lines.append(f"  {len(notable) - limit} further divergences suppressed")
+    tail = sum(note.kind == "exhausted" for note in result.replay_divergences)
+    if tail:
+        lines.append(f"  Recorded prefix ended; {tail} FIFO continuation choices (soft).")
+    if result.unused_decisions:
+        lines.append(f"  {result.unused_decisions} recorded decisions were never reached.")
+    if result.diverged or result.unused_decisions:
+        lines.append("  This run cannot confirm the recorded schedule. Re-fuzz the current code.")
+    return "\n".join(lines)
