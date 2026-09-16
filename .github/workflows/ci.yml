@@ -8,16 +8,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
+
       - run: uv sync --all-extras --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -27,10 +31,16 @@ jobs:
   future-python:
     runs-on: ubuntu-latest
     continue-on-error: true
+
+    env:
+      CHAOSLOOP_ALLOW_UNSUPPORTED: "1"
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.14"
+
       - run: uv sync --all-extras --dev
       - run: uv run pytest
