@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_DIR = Path(".chaosloop")
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 class LegacyCorpusWarning(RuntimeWarning):
     """v1 entry usable byt cannot validate recorded task identity"""

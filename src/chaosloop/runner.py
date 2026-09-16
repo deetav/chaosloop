@@ -7,7 +7,7 @@ import copy
 import inspect
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from . import invariants as _inv
 from .clock import VirtualClock
@@ -24,9 +24,10 @@ from .oracles import (
     Outcome,
     RunContext,
     Severity,
-TaskLeak,
+    TaskLeak,
     TimeBudgetOracle,
     UnhandledException,
+    UnretrievedException,
 )
 from .oracles.base import failure_site
 from .oracles.outcome import CONTROL_ERRORS
@@ -37,6 +38,9 @@ from .schedulers.random_ import Random
 from .schedulers.replay import Divergence, Replay
 from .trace import Step, Trace
 
+if TYPE_CHECKING:
+    from .shrink import ShrinkResult
+
 Scenario = Callable[[], Coroutine[Any, Any, Any]]
 
 DEFAULT_ORACLES: tuple[type[OracleBase], ...] = (
@@ -44,6 +48,8 @@ DEFAULT_ORACLES: tuple[type[OracleBase], ...] = (
     DeadlockOracle,
     LivelockOracle,
     TimeBudgetOracle,
+    UnretrievedException,
+    TaskLeak,
 )
 
 
@@ -139,7 +145,16 @@ class Trial:
             schedule = f"scheduler=chaosloop.Replay({self.decisions!r}, strict=True)"
         return f"chaosloop.trial(scenario, {schedule}{bounds}{checks})"
 
-    def report(self, *, trace_limit: int | None = None, show_trace: bool = True) -> str:
+    def report(
+        self,
+        *,
+        trace_limit: int | None = None,
+        show_trace: bool = True,
+        shrink_result: ShrinkResult | None = None,
+    ) -> str:
+        """Human presentation; optional limits never change the recorded data."""
+        if shrink_result is not None:
+            return shrink_result.report(show_diff=show_trace)
         lines = [
             f"{'PASSED' if self.ok else 'FAILED'}  seed={self.seed}  "
             f"scheduler={self.trace.scheduler}"
@@ -215,7 +230,6 @@ def _build_oracles(
 
 
 async def _invoke(scenario: Scenario) -> Any:
-    # Construct inside the running loop: factories may create loop-bound state.
     coroutine = scenario()
     if not inspect.iscoroutine(coroutine):
         raise _InvalidScenarioError("scenario factory must return a fresh coroutine object")
@@ -228,7 +242,6 @@ async def _join_cancelled(tasks: list[asyncio.Task[Any]]) -> None:
 
 
 def _shutdown(loop: ChaosEventLoop) -> None:
-    """Cancel in creation order, join finally blocks, close async generators."""
     while pending := loop.pending_tasks():
         for task in pending:
             task.cancel()
@@ -250,6 +263,7 @@ def _execute(
     max_time: float | None,
     oracles: Sequence[Oracle] | None,
     invariants: Sequence[Invariant],
+    record_trace: bool = True,
 ) -> Trial:
     _check_not_running()
     strategy = _resolve_scheduler(seed, scheduler)
@@ -258,7 +272,12 @@ def _execute(
     clock = VirtualClock(max_time=max_time)
     selected = _build_oracles(oracles, invariants)
     actual_seed = strategy.seed if isinstance(strategy, Random) else None
-    trace = Trace(seed=actual_seed, scheduler=type(strategy).__name__)
+    if type(record_trace) is not bool:
+        raise TypeError("record_trace must be boolean")
+    full_hooks = record_trace or any(
+        type(o) not in (*DEFAULT_ORACLES, InvariantOracle) for o in selected
+    )
+    trace = Trace(seed=actual_seed, scheduler=type(strategy).__name__, recording=full_hooks)
     findings: list[Finding] = []
 
     def call_hook(oracle: Oracle, hook: str, *args: Any) -> Finding | None:
@@ -282,7 +301,24 @@ def _execute(
                 if finding.severity is Severity.FAILURE:
                     raise _OracleAbortError()
 
-    loop = ChaosEventLoop(strategy, clock, trace, max_steps, step_hook=step_hook)
+    inv_oracle = next((o for o in selected if isinstance(o, InvariantOracle)), None)
+
+    def compact_hook(location: str | None) -> None:
+        if inv_oracle is not None:
+            finding = call_hook(inv_oracle, "check", ctx, location)
+            if finding is not None:
+                findings.append(finding)
+                if finding.severity is Severity.FAILURE:
+                    raise _OracleAbortError()
+
+    loop = ChaosEventLoop(
+        strategy,
+        clock,
+        trace,
+        max_steps,
+        step_hook=step_hook if full_hooks else None,
+        compact_hook=compact_hook if not full_hooks and inv_oracle else None,
+    )
     ctx: RunContext = _RunView(loop, trace)
     inv_oracle = next((o for o in selected if isinstance(o, InvariantOracle)), None)
     token = _inv._bind(loop, inv_oracle)
@@ -301,6 +337,8 @@ def _execute(
         error = caught
     finally:
         vtime = clock.now
+        # Discover ignored results while Tasks are still strongly retained. This
+        # removes GC timing from detection and excludes already-awaited failures.
         loop.collect_task_errors()
         completed = (
             main is not None
@@ -330,6 +368,7 @@ def _execute(
             loop.close()
     if isinstance(error, (KeyboardInterrupt, SystemExit, _InvalidScenarioError)):
         raise error
+    # Preserve Week 5's raw background error surface as well as the new finding.
     if error is None and loop.exceptions:
         captured = loop.exceptions[0].get("exception")
         error = (
@@ -341,8 +380,8 @@ def _execute(
         actual_seed,
         value if error is None else None,
         error,
-        trace,
-        len(trace.steps),
+        trace if record_trace else trace.compact(),
+        trace.count,
         vtime,
         tuple(findings),
         max_steps,
@@ -395,6 +434,7 @@ def trial(
     max_time: float | None = None,
     oracles: Sequence[Oracle] | None = None,
     invariants: Sequence[Invariant] = (),
+    record_trace: bool = True,
 ) -> Trial:
     """Run fresh work; capture scenario failures and oracle findings.
 
@@ -412,4 +452,5 @@ def trial(
         max_time=max_time,
         oracles=oracles,
         invariants=invariants,
+        record_trace=record_trace,
     )

@@ -13,33 +13,18 @@ from pathlib import Path
 
 from .clock import VirtualClock
 from .corpus import DEFAULT_DIR, Corpus, CorpusEntry
-from .oracles import Finding, Invariant, Oracle, Severity
-from .oracles.base import failure_site
-from .runner import Scenario, Trial, _check_not_running, trial
+from .oracles import Finding, Invariant, InvariantOracle, Oracle, Severity, TaskLeak
+from .runner import DEFAULT_ORACLES, Scenario, Trial, _check_not_running, trial
 from .schedulers import Random, Replay, Scheduler
+from .shrink import ShrinkBudget, ShrinkError, ShrinkResult
+from .shrink import failure_findings as _failure_findings
+from .shrink import shrink as shrink_schedule
 from .trace import Trace
 
 SchedulerFactory = Callable[[int], Scheduler]
 
 
-def _failure_findings(result: Trial) -> tuple[Finding, ...]:
-    failures = tuple(f for f in result.findings if f.severity is Severity.FAILURE)
-    if failures or result.error is None:
-        return failures
-    #  Cleanup errors also need a bucket even without an oracle.
-    return (
-        Finding(
-            "execution_error",
-            Severity.FAILURE,
-            f"{type(result.error).__name__}: {result.error}",
-            step=result.steps,
-            site=failure_site(result.error),
-        ),
-    )
-
-
 def _rank(result: Trial) -> tuple[int, int, int, tuple[int, ...]]:
-    #deviations, seed, steps, decisions
     return (
         sum(d != 0 for d in result.decisions),
         result.seed if result.seed is not None else 2**63,
@@ -55,6 +40,7 @@ class Bucket:
     exemplar: Trial
     seeds: list[int] = field(default_factory=list)
     count: int = 0
+    shrink_result: ShrinkResult | None = None
 
     @property
     def deviations(self) -> int:
@@ -86,7 +72,8 @@ def bucket_failures(trials: Iterable[Trial]) -> list[Bucket]:
 def _trace_excerpt(result: Trial, limit: int) -> str:
     if limit <= 0:
         return ""
-    # Prioritize the finding and actual deviations, with nearby context
+    # Prioritize the finding and actual deviations, with nearby context. The
+    # set is only deduplication; selected indices are explicitly sorted.
     selected: set[int] = set()
     targets = [f.step - 1 for f in result.findings if f.step is not None]
     targets.extend(i for i, step in enumerate(result.trace.steps) if step.chosen != 0)
@@ -111,20 +98,31 @@ class FuzzResult:
     failures: list[Trial] = field(default_factory=list)
     warnings: list[Trial] = field(default_factory=list)
     stopped_early: str | None = None
-    fresh_trials_run: int = 0 #new seeds explored
-    corpus_replayed: int = 0 # saved failures
-    corpus_still_failing: int = 0 #same failure still reproduces
-    corpus_forgotten: int = 0 # ola failure passes
-    corpus_changed: int = 0 # replay fails with different failure
+    fresh_trials_run: int = 0
+    corpus_replayed: int = 0
+    corpus_still_failing: int = 0
+    corpus_forgotten: int = 0
+    corpus_changed: int = 0
     corpus_recorded: int = 0
+    corpus_diverged: int = 0
+    shrink_elapsed: float = 0.0
+    shrinks: dict[str, ShrinkResult] = field(default_factory=dict)
+    shrink_errors: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
-        return not self.failures
+        return not self.failures and not self.corpus_diverged
 
     @property
     def buckets(self) -> list[Bucket]:
-        return bucket_failures(self.failures)
+        buckets = bucket_failures(self.failures)
+        for bucket in buckets:
+            reduced = self.shrinks.get(bucket.signature)
+            if reduced is not None:
+                bucket.shrink_result = reduced
+                if reduced.verified:
+                    bucket.exemplar = reduced.final_trial
+        return buckets
 
     @property
     def trials_per_second(self) -> float:
@@ -152,13 +150,22 @@ class FuzzResult:
             f"chaosloop: {self.scenario}",
             f"  corpus: {self.corpus_replayed} replayed; {self.corpus_still_failing} still fail; "
             f"{self.corpus_forgotten} no longer reproduce (forgotten); "
-            f"{self.corpus_changed} changed",
+            f"{self.corpus_changed} changed; {self.corpus_diverged} diverged (unknown)",
             f"  {self.fresh_trials_run} fresh trials; {len(self.failures)} failing trials "
             f"in {len(buckets)} distinct buckets; "
             f"stopped={self.stopped_early or 'seeds_exhausted'}",
         ]
         if include_timing:
             lines.append(f"  {self.elapsed:.3f}s; {self.trials_per_second:.0f} trials/s")
+        if self.shrinks:
+            lines.append(
+                f"  shrinking: {len(self.shrinks)} exemplars; "
+                f"{sum(s.replays for s in self.shrinks.values())} replays"
+            )
+            if include_timing:
+                lines.append(f"  shrink time: {self.shrink_elapsed:.3f}s (separate from search)")
+        for message in self.shrink_errors.values():
+            lines.append(f"  Shrinking could not verify a result: {message}")
         if self.ok:
             lines.append("  No failures found in the schedules tried.")
         for number, bucket in enumerate(buckets[:max_buckets], 1):
@@ -174,9 +181,16 @@ class FuzzResult:
             )
             if bucket.finding.detail:
                 lines.append(bucket.finding.detail)
-            if trace_lines:
-                lines.append(_trace_excerpt(bucket.exemplar, trace_lines))
-            lines.append(f"  Reproduce: {bucket.exemplar.reproduction()}")
+            if bucket.shrink_result is not None:
+                lines.append(
+                    bucket.shrink_result.report(
+                        show_diff=bool(trace_lines), include_timing=include_timing
+                    )
+                )
+            else:
+                if trace_lines:
+                    lines.append(_trace_excerpt(bucket.exemplar, trace_lines))
+                lines.append(f"  Reproduce: {bucket.exemplar.reproduction()}")
             others = [seed for seed in bucket.seeds if seed != bucket.exemplar.seed]
             if others:
                 suffix = f" ({len(others) - 5} more)" if len(others) > 5 else ""
@@ -226,25 +240,28 @@ def _scenario_key(scenario: Scenario) -> str:
     return f"{module}.{name}"
 
 
-#public search engine
 def fuzz(
-    scenario: Scenario, #coroutine factory
+    scenario: Scenario,
     *,
-    trials: int = 1000, #max fresh schedules to try
-    seeds: Iterable[int] | None = None, #custom seed iterable
-    scheduler_factory: SchedulerFactory | None = None, #maps seed to scheduler
-    max_steps: int = 1_000_000, #per-trial scheduling step limit
-    max_time: float | None = None, ## virtual time limit per trial
+    trials: int = 1000,
+    seeds: Iterable[int] | None = None,
+    scheduler_factory: SchedulerFactory | None = None,
+    max_steps: int = 1_000_000,
+    max_time: float | None = None,
     oracles: Sequence[Oracle] | None = None,
     invariants: Sequence[Invariant] = (),
     fail_fast: bool = True,
-    time_budget: float | None = None, # for entire fuzz campaign (wall clock)
+    time_budget: float | None = None,
     on_progress: Callable[[Progress], None] | None = None,
-    corpus: Corpus | Path | None = DEFAULT_DIR, #persistent store of known failing schedules
+    corpus: Corpus | Path | None = DEFAULT_DIR,
+    shrink: bool = True,
+    shrink_budget: ShrinkBudget | None = None,
 ) -> FuzzResult:
     """Replay stored failures, then consume at most trials fresh seeds lazily"""
 
     _check_not_running()
+    if type(shrink) is not bool:
+        raise TypeError("shrink must be boolean")
     if not callable(scenario):
         raise TypeError("scenario must be a coroutine factory")
     if type(trials) is not int or trials < 0:
@@ -270,7 +287,6 @@ def fuzz(
             return True
         return False
 
-    #throttle progress callback
     def progress(force: bool = False) -> None:
         nonlocal last_progress
         if (
@@ -309,8 +325,13 @@ def fuzz(
                         finding.site,
                         sum(d != 0 for d in run.decisions),
                         datetime.now(UTC).isoformat(),
+                        task_ids=run.trace.task_ids,
+                        max_steps=run.max_steps,
+                        max_time=run.max_time,
+                        fail_on_task_leak=run.fail_on_task_leak,
                     )
                 )
+                # Counts successful new/replacement writes, not unchanged entries.
                 result.corpus_recorded += int(recorded)
 
     try:
@@ -319,16 +340,27 @@ def fuzz(
             if timed_out():
                 break
             last_seed = entry.seed
+            replay_checks = oracles
+            if replay_checks is None and entry.fail_on_task_leak:
+                replay_checks = [make() for make in DEFAULT_ORACLES if make is not TaskLeak]
+                replay_checks = [*replay_checks, TaskLeak(Severity.FAILURE), InvariantOracle()]
             run = trial(
                 scenario,
-                scheduler=Replay(entry.decisions),
-                max_steps=max_steps,
-                max_time=max_time,
-                oracles=oracles,
+                scheduler=Replay(entry.decisions, task_ids=entry.task_ids),
+                max_steps=entry.max_steps,
+                max_time=entry.max_time,
+                oracles=replay_checks,
                 invariants=invariants,
             )
             run = replace(run, seed=entry.seed)
             result.corpus_replayed += 1
+            if run.diverged or run.unused_decisions:
+                # This verdict belongs to a different/incomplete replay. Never
+                # forget or overwrite the old evidence, or bucket it as a bug.
+                result.corpus_diverged += 1
+                result.trials_run += 1
+                progress()
+                continue
             signatures = {f.signature for f in _failure_findings(run)}
             if entry.signature in signatures:
                 result.corpus_still_failing += 1
@@ -336,6 +368,8 @@ def fuzz(
                 if store is not None and store.forget(result.scenario, entry.signature):
                     result.corpus_forgotten += 1
             else:
+                # A different failure can mask the original. Retain the old
+                # entry rather than claiming that its bug has been fixed.
                 result.corpus_changed += 1
             accept(run)
             progress()
@@ -370,4 +404,43 @@ def fuzz(
     finally:
         result.elapsed = time.perf_counter() - started
         progress(force=True)
+    if shrink and result.failures:
+        shrink_started = time.perf_counter()
+        shared_budget = shrink_budget if shrink_budget is not None else ShrinkBudget()
+        for bucket in bucket_failures(result.failures):
+            try:
+                reduced = shrink_schedule(
+                    scenario,
+                    bucket.exemplar,
+                    finding=bucket.finding,
+                    budget=shared_budget,
+                    oracles=oracles,
+                    invariants=invariants,
+                )
+            except ShrinkError as error:
+                result.shrink_errors[bucket.signature] = str(error)
+                continue
+            result.shrinks[bucket.signature] = reduced
+            if store is not None and reduced.verified:
+                final = reduced.final_trial
+                result.corpus_recorded += int(
+                    store.record(
+                        CorpusEntry(
+                            result.scenario,
+                            bucket.signature,
+                            None,
+                            reduced.minimal,
+                            bucket.finding.message,
+                            bucket.finding.site,
+                            reduced.minimal_deviations,
+                            datetime.now(UTC).isoformat(),
+                            task_ids=reduced.minimal_task_ids,
+                            original_deviations=reduced.original_deviations,
+                            max_steps=final.max_steps,
+                            max_time=final.max_time,
+                            fail_on_task_leak=final.fail_on_task_leak,
+                        )
+                    )
+                )
+        result.shrink_elapsed = time.perf_counter() - shrink_started
     return result

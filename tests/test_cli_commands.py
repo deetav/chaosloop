@@ -132,10 +132,10 @@ def test_seed_replay_and_strict_unused_decisions(tmp_path, capsys):
     run = c.trial(load_scenario(MODULE + "clean").factory)
     path = tmp_path / "choices.json"
     path.write_text(json.dumps([*run.decisions, 0]))
-    assert main(["replay", MODULE + "clean", "--decisions", str(path), "--strict"]) == 3
+    assert main(["replay", MODULE + "clean", "--decisions", str(path), "--strict"]) == 5
     path.write_text("[999]")
-    assert main(["replay", MODULE + "clean", "--decisions", str(path), "--strict"]) == 3
-    assert main(["replay", MODULE + "clean", "--decisions", str(path)]) == 0
+    assert main(["replay", MODULE + "clean", "--decisions", str(path), "--strict"]) == 5
+    assert main(["replay", MODULE + "clean", "--decisions", str(path)]) == 5
 
 
 def test_corpus_selection_changed_failure_and_forgetting(tmp_path, capsys):
@@ -181,7 +181,7 @@ def test_json_plain_values_cycles_and_mappings():
         "[false]",
         "{}",
         '{"version":2}',
-        '{"chaosloop":"0.4.0","schema":99}',
+        '{"chaosloop":"0.3.0","schema":99}',
         '{"decisions":[]}',
     ],
 )

@@ -8,22 +8,25 @@ import math
 import sys
 from contextlib import nullcontext, redirect_stdout
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Never
 
 from .. import __version__
 from ..corpus import DEFAULT_DIR, Corpus, CorpusEntry
 from ..exceptions import ReplayMismatch
-from ..fuzz import _failure_findings, default_progress, fuzz
+from ..fuzz import default_progress, fuzz
 from ..oracles import Oracle, Severity, TaskLeak
 from ..runner import DEFAULT_ORACLES, _InvalidScenarioError, trial
 from ..schedulers import Fifo, Random, Replay
+from ..shrink import ShrinkBudget, ShrinkError, shrink
+from ..shrink import failure_findings as _failure_findings
 from ..trace import Trace
-from .render import emit_json, fuzz_data, trial_data
+from .doctor import diagnose_environment, diagnose_scenario
+from .render import emit_json, fuzz_data, render_divergences, shrink_data, trial_data
 from .replay import SavedSchedule, read_schedule
 from .seeds import parse_seeds
 from .specs import ScenarioLoadError, load_scenario
-from .doctor import diagnose_scenario, diagnose_environment
 
 
 class UsageError(Exception):
@@ -76,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("run", "execute one schedule"),
             ("fuzz", "search a bounded set of seeds"),
             ("replay", "retry a saved schedule"),
+            ("shrink", "minimize one known failure"),
             ("trace", "read a saved trace"),
             ("doctor", "diagnose reproducibility"),
         )
@@ -113,6 +117,23 @@ def build_parser() -> argparse.ArgumentParser:
     corpus = search.add_mutually_exclusive_group()
     corpus.add_argument("--corpus", type=Path, default=DEFAULT_DIR)
     corpus.add_argument("--no-corpus", action="store_true")
+    search.add_argument(
+        "--shrink",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="default: on for fail-fast, off for --all",
+    )
+    for command in (search, commands["shrink"]):
+        command.add_argument("--shrink-budget", type=_nonnegative, default=5000)
+        command.add_argument("--shrink-seconds", type=_seconds, default=60.0)
+    minimize = commands["shrink"]
+    _bounds(minimize, replay=True)
+    origin = minimize.add_mutually_exclusive_group(required=True)
+    origin.add_argument("--seed", type=int)
+    origin.add_argument("--corpus-entry")
+    origin.add_argument("--decisions", type=Path)
+    minimize.add_argument("--corpus", type=Path, default=DEFAULT_DIR)
+    minimize.add_argument("--no-corpus", action="store_true", help="do not persist the result")
     replay = commands["replay"]
     _bounds(replay, replay=True)
     source = replay.add_mutually_exclusive_group(required=True)
@@ -122,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--corpus-all", action="store_true")
     replay.add_argument("--corpus", type=Path, default=DEFAULT_DIR)
     replay.add_argument(
-        "--strict", action="store_true", help="reject missing, invalid or unused choices"
+        "--strict", action="store_true", help="stop before a hard replay divergence"
     )
     replay.add_argument(
         "--forget", action="store_true", help="delete selected entries ONLY on clean replay"
@@ -202,9 +223,11 @@ def _fuzz(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
         time_budget=args.time_budget,
         corpus=None if args.no_corpus else args.corpus,
         on_progress=None if args.quiet or args.json else default_progress,
+        shrink=args.fail_fast if args.shrink is None else args.shrink,
+        shrink_budget=ShrinkBudget(args.shrink_budget, args.shrink_seconds),
     )
     return (
-        int(not result.ok),
+        5 if result.corpus_diverged else int(not result.ok),
         fuzz_data(result),
         result.report(include_timing=True, show_warnings=True),
     )
@@ -232,7 +255,7 @@ def _replay(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
     if from_corpus and not entries:
         raise ScenarioLoadError(f"no stored entries for {ref.key}")
     schedules: list[tuple[SavedSchedule, CorpusEntry | None]] = [
-        (SavedSchedule(entry.decisions, entry.scenario), entry) for entry in entries
+        (SavedSchedule.from_entry(entry), entry) for entry in entries
     ]
     if args.decisions:
         schedules = [(read_schedule(args.decisions), None)]
@@ -249,19 +272,21 @@ def _replay(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
             ref.factory,
             scheduler=Random(args.seed)
             if args.seed is not None
-            else Replay(saved.decisions, strict=args.strict),
+            else Replay(saved.decisions, task_ids=saved.task_ids, strict=args.strict),
             max_steps=args.max_steps
             if args.max_steps is not None
             else saved.max_steps or 1_000_000,
             max_time=args.max_time if args.max_time is not None else saved.max_time,
             oracles=_checks(promote),
         )
-        mismatch = isinstance(result.error, ReplayMismatch) or (
-            args.strict and len(result.decisions) != len(saved.decisions)
+        mismatch = (
+            result.diverged
+            or isinstance(result.error, ReplayMismatch)
+            or bool(result.unused_decisions)
         )
         signatures = {finding.signature for finding in _failure_findings(result)}
         if mismatch:
-            status, code = "MISMATCH: recorded schedule no longer applies", 3
+            status, code = "DIVERGED: recorded schedule could not be followed completely", 5
         elif result.ok:
             status, code = "NO LONGER REPRODUCES in this schedule (not proof of a fix)", 0
         elif entry is not None and entry.signature not in signatures:
@@ -281,7 +306,7 @@ def _replay(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
             }
         )
         output.append(
-            f"{status}\n{result.report(trace_limit=40)}"
+            f"{status}\n{render_divergences(result)}\n{result.report(trace_limit=40)}"
             + ("\nCorpus entry forgotten." if forgotten else "")
         )
     data: dict[str, Any] = {"scenario": ref.key, "replays": rows}
@@ -289,6 +314,118 @@ def _replay(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
     if len(rows) == 1:
         data.update(rows[0])
     return exit_code, data, "\n\n".join(output)
+
+
+def _shrink(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
+    ref = load_scenario(args.spec)
+    store = Corpus(args.corpus)
+    entry = None
+    saved = SavedSchedule([])
+    if args.corpus_entry is not None:
+        entries = [
+            e
+            for e in store.load(ref.key)
+            if hashlib.sha256(e.signature.encode()).hexdigest().startswith(args.corpus_entry)
+        ]
+        if len(entries) != 1:
+            raise ScenarioLoadError(
+                f"corpus prefix must match exactly one entry; found {len(entries)}"
+            )
+        entry = entries[0]
+        saved = SavedSchedule.from_entry(entry)
+    elif args.decisions:
+        saved = read_schedule(args.decisions)
+    if saved.scenario is not None and saved.scenario != ref.key:
+        raise ScenarioLoadError(f"schedule belongs to {saved.scenario}, not {ref.key}")
+    promote = args.fail_on_task_leak or saved.fail_on_task_leak
+    checks = _checks(promote)
+    original = trial(
+        ref.factory,
+        scheduler=Random(args.seed)
+        if args.seed is not None
+        else Replay(saved.decisions, task_ids=saved.task_ids, strict=True),
+        max_steps=args.max_steps if args.max_steps is not None else saved.max_steps or 1_000_000,
+        max_time=args.max_time if args.max_time is not None else saved.max_time,
+        oracles=checks,
+    )
+    if original.diverged or original.unused_decisions:
+        return (
+            5,
+            {"scenario": ref.key, "result": trial_data(original)},
+            "DIVERGED\n" + render_divergences(original),
+        )
+    if original.ok:
+        return (
+            0,
+            {"scenario": ref.key, "result": trial_data(original)},
+            "No failure in this schedule; nothing to shrink.",
+        )
+    target = (
+        None
+        if entry is None
+        else next((f for f in _failure_findings(original) if f.signature == entry.signature), None)
+    )
+    if entry is not None and target is None:
+        raise ShrinkError("recorded target is masked by a changed failure; re-fuzz current code")
+    result = shrink(
+        ref.factory,
+        original,
+        finding=target,
+        oracles=checks,
+        budget=ShrinkBudget(args.shrink_budget, args.shrink_seconds),
+    )
+    human = result.report(include_timing=True)
+    recorded = False
+    if not args.no_corpus and result.verified:
+        recorded = store.record(
+            CorpusEntry(
+                ref.key,
+                result.finding.signature,
+                None,
+                result.minimal,
+                result.finding.message,
+                result.finding.site,
+                result.minimal_deviations,
+                datetime.now(UTC).isoformat(),
+                task_ids=result.minimal_task_ids,
+                original_deviations=result.original_deviations,
+                max_steps=original.max_steps,
+                max_time=original.max_time,
+                fail_on_task_leak=promote,
+            )
+        )
+        if recorded:
+            import shlex
+
+            prefix = hashlib.sha256(result.finding.signature.encode()).hexdigest()[:12]
+            command = shlex.join(
+                [
+                    "chaosloop",
+                    "replay",
+                    args.spec,
+                    "--corpus",
+                    str(args.corpus),
+                    "--corpus-entry",
+                    prefix,
+                    "--strict",
+                ]
+            )
+            human += f"\nSaved corpus replay: {command}"
+    data = trial_data(result.final_trial) | {
+        "decisions": result.minimal,
+        "task_ids": result.minimal_task_ids,
+    }
+    return (
+        1,
+        {
+            "scenario": ref.key,
+            "result": data,
+            "shrink": shrink_data(result),
+            "recorded": recorded,
+            "config": {"fail_on_task_leak": promote},
+        },
+        human,
+    )
 
 
 def _trace(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
@@ -328,7 +465,6 @@ def _doctor(args: argparse.Namespace) -> tuple[int, dict[str, Any], str]:
     return code, {"checks": [asdict(check) for check in checks]}, "\n".join(lines)
 
 
-
 def main(argv: list[str] | None = None) -> int:
     """Return 0 clean, 1 findings, 2 usage, 3 load/replay I/O, 4 internal, 130 interrupt.
 
@@ -338,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     machine = "--json" in raw
     command = next(
-        (arg for arg in raw if arg in {"run", "fuzz", "replay", "trace", "doctor"}), "cli"
+        (arg for arg in raw if arg in {"run", "fuzz", "replay", "shrink", "trace", "doctor"}), "cli"
     )
     try:
         try:
@@ -350,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
                 "run": _run,
                 "fuzz": _fuzz,
                 "replay": _replay,
+                "shrink": _shrink,
                 "trace": _trace,
                 "doctor": _doctor,
             }[args.command](args)
@@ -362,6 +499,8 @@ def main(argv: list[str] | None = None) -> int:
         code, message = 3, f"scenario requested process exit: {error}"
     except KeyboardInterrupt:
         code, message = 130, "interrupted"
+    except ShrinkError as error:
+        code, message = 5, str(error)
     except UsageError as error:
         code, message = 2, str(error)
     except (ScenarioLoadError, _InvalidScenarioError) as error:

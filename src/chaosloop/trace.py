@@ -93,10 +93,39 @@ class Trace:
     steps: list[Step] = field(default_factory=list)
     seed: int | None = None
     scheduler: str = ""
+    recording: bool = True
+    _rows: list[tuple[int, str | None, int, float, str, int]] = field(
+        default_factory=list, repr=False
+    )
+
+    @property
+    def count(self) -> int:
+        return len(self.steps) if self.recording else len(self._rows)
+
+    def record_compact(
+        self, n: int, task_id: str | None, chosen: int, vtime: float, kind: str, n_candidates: int
+    ) -> None:
+        self._rows.append((n, task_id, chosen, round(float(vtime), 9) or 0.0, kind, n_candidates))
+
+    def compact(self) -> "Trace":
+        result = Trace(seed=self.seed, scheduler=self.scheduler, recording=False)
+        if self.recording:
+            for step in self.steps:
+                result.record_compact(
+                    step.n, step.task_id, step.chosen, step.vtime, step.kind, step.n_candidates
+                )
+        else:
+            result._rows = self._rows.copy()
+        return result
 
     def record(self, step: Step) -> None:
         """Append the immutable description of a selected callback."""
-        self.steps.append(step)
+        if self.recording:
+            self.steps.append(step)
+        else:
+            self.record_compact(
+                step.n, step.task_id, step.chosen, step.vtime, step.kind, step.n_candidates
+            )
 
     def snapshot(self) -> tuple[Step, ...]:
         """Detach the current sequence from future appends to this recorder."""
@@ -105,12 +134,20 @@ class Trace:
     @property
     def decisions(self) -> list[int]:
         """Return the schedule in the scheduler-independent replay format."""
-        return [step.chosen for step in self.steps]
+        return (
+            [step.chosen for step in self.steps]
+            if self.recording
+            else [row[2] for row in self._rows]
+        )
 
     @property
     def task_ids(self) -> list[str | None]:
-        """Return the task identity recorded at each step, parallel to decisions."""
-        return [step.task_id for step in self.steps]
+        """Parallel identity vector, including None for non-task callbacks."""
+        return (
+            [step.task_id for step in self.steps]
+            if self.recording
+            else [row[1] for row in self._rows]
+        )
 
     def digest(self) -> str:
         """Return a stable 16-character structural fingerprint of the schedule."""
@@ -125,7 +162,9 @@ class Trace:
                     step.n_candidates,
                 ]
                 for step in self.steps
-            ],
+            ]
+            if self.recording
+            else self._rows,
             separators=(",", ":"),
             ensure_ascii=True,
             allow_nan=False,
@@ -138,6 +177,8 @@ class Trace:
         Newline-delimited JSON keeps traces streamable and preserves seed and
         scheduler metadata, including for an empty trace.
         """
+        if not self.recording:
+            raise ValueError("compact trace has no display history; replay with record_trace=True")
         rows: list[dict[str, object]] = [
             {"type": "metadata", "version": 1, "seed": self.seed, "scheduler": self.scheduler}
         ]
@@ -180,6 +221,8 @@ class Trace:
         """Render choices with a marker beside every deviation from FIFO"""
         if limit is not None and (type(limit) is not int or limit < 0):
             raise ValueError("limit must be a nonnegative integer or None")
+        if not self.recording:
+            return ""
         shown = self.steps if limit is None else self.steps[:limit]
         lines = [f"{'step':>5}  {'vtime':>9}  {'task':<12}  {'action':<40}  at"]
         for step in shown:

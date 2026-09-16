@@ -19,7 +19,6 @@ from .clock import VirtualClock
 from .compat import (
     callback_label,
     check_supported,
-    coro_location,
     describe_await,
     handle_state,
     is_completion_callback,
@@ -68,6 +67,7 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         trace: Trace | None = None,
         max_steps: int = 1_000_000,
         step_hook: Callable[[Step], None] | None = None,
+        compact_hook: Callable[[str | None], None] | None = None,
     ) -> None:
         check_supported()
         if type(max_steps) is not int or max_steps <= 0:
@@ -76,6 +76,7 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         self._trace = trace if trace is not None else Trace()
         self._scheduler = scheduler
         self._step_hook = step_hook
+        self._compact_hook = compact_hook
         self._max_steps = max_steps
         self._steps = 0
         self._recording = True
@@ -205,23 +206,31 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
         chosen = candidates[choice]
         handle = state._ready[chosen.index]
         task = task_of(handle)
-        user_before = user_coro_location(task) if task is not None else None
+        needs_site = self._recording and (
+            self._step_hook is not None or self._compact_hook is not None
+        )
+        user_before = user_coro_location(task) if needs_site and task is not None else None
         del state._ready[chosen.index]
         self._turn_pending.pop(id(handle), None)
         if self._recording:
             self._steps += 1
-            self._trace.record(
-                Step(
-                    n=self._steps,
-                    vtime=self.time(),
-                    chosen=choice,
-                    n_candidates=len(candidates),
-                    task_id=chosen.task_id,
-                    kind=chosen.kind,
-                    label=chosen.label,
-                    location=chosen.location,
+            if self._trace.recording:
+                self._trace.record(
+                    Step(
+                        self._steps,
+                        self.time(),
+                        choice,
+                        len(candidates),
+                        chosen.task_id,
+                        chosen.kind,
+                        chosen.label,
+                        chosen.location,
+                    )
                 )
-            )
+            else:
+                self._trace.record_compact(
+                    self._steps, chosen.task_id, choice, self.time(), chosen.kind, len(candidates)
+                )
         state._current_handle = handle
         try:
             handle_state(handle)._run()  # Handle._run preserves its contextvars context.
@@ -233,6 +242,9 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
                 # the new user suspension site, not asyncio's sleep implementation.
                 location = (user_coro_location(task) if task is not None else None) or user_before
                 self._step_hook(replace(self._trace.steps[-1], location=location))
+            elif self._compact_hook is not None:
+                location = (user_coro_location(task) if task is not None else None) or user_before
+                self._compact_hook(location)
             self._scheduler.observe(
                 StepEvent(
                     step=self._steps,
@@ -261,8 +273,10 @@ class ChaosEventLoop(asyncio.SelectorEventLoop):
                     index=raw_index,
                     task_id=identity,
                     kind=kind,
-                    label=label,
-                    location=coro_location(task) if task is not None else None,
+                    label=label if self._trace.recording else "",
+                    location=user_coro_location(task)
+                    if self._trace.recording and task is not None
+                    else None,
                 )
             )
         return tuple(candidates)

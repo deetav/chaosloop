@@ -168,7 +168,7 @@ def test_corpus_replay_happens_before_fresh_seeds(tmp_path):
         events.append("fresh")
         return c.Random(seed)
 
-    result = c.fuzz(scenario, trials=2, scheduler_factory=factory, corpus=corpus)
+    result = c.fuzz(scenario, trials=2, scheduler_factory=factory, corpus=corpus, shrink=False)
     assert events == ["run"] and result.corpus_replayed == 1
     assert result.corpus_still_failing == 1 and result.fresh_trials_run == 0
     assert result.failures[0].trace.scheduler == "Replay"

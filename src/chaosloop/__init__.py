@@ -2,6 +2,7 @@
 
 
 from .clock import VirtualClock
+from .diff import DiffRow, diff_traces, render_diff
 from .exceptions import (
     ChaosloopError,
     Deadlock,
@@ -13,6 +14,7 @@ from .exceptions import (
 )
 from .runner import Trial, run, trial
 from .schedulers import Candidate, Divergence, Fifo, Random, Replay, Scheduler, StepEvent
+from .shrink import ShrinkBudget, ShrinkError, ShrinkResult, shrink
 from .trace import Step, Trace, Tracer
 
 __version__ = "0.4.0"
@@ -92,4 +94,15 @@ __all__ += [
     "default_progress",
     "fuzz",
     "invariant",
+]
+
+
+__all__ += [
+    "DiffRow",
+    "ShrinkBudget",
+    "ShrinkError",
+    "ShrinkResult",
+    "diff_traces",
+    "render_diff",
+    "shrink",
 ]

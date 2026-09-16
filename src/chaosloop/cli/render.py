@@ -11,6 +11,7 @@ from .. import __version__
 from ..fuzz import FuzzResult
 from ..oracles import Finding
 from ..runner import Trial
+from ..shrink import ShrinkResult
 
 
 def finding_data(finding: Finding) -> dict[str, Any]:
@@ -62,6 +63,10 @@ def trial_data(result: Trial) -> dict[str, Any]:
         "vtime": result.vtime,
         "digest": result.digest,
         "decisions": result.decisions,
+        "task_ids": result.trace.task_ids,
+        "diverged": result.diverged,
+        "divergences": [asdict(note) for note in result.replay_divergences],
+        "unused_decisions": result.unused_decisions,
         "trace": [asdict(step) for step in result.trace.steps],
         "max_steps": result.max_steps,
         "max_time": result.max_time,
@@ -77,12 +82,18 @@ def fuzz_data(result: FuzzResult) -> dict[str, Any]:
         "fresh_trials_run": result.fresh_trials_run,
         "elapsed": result.elapsed,
         "stopped_early": result.stopped_early,
+        "shrink_elapsed": result.shrink_elapsed,
+        "shrink_errors": result.shrink_errors,
+        "shrinks": {
+            signature: shrink_data(reduced) for signature, reduced in result.shrinks.items()
+        },
         "corpus": {
             "replayed": result.corpus_replayed,
             "still_failing": result.corpus_still_failing,
             "forgotten": result.corpus_forgotten,
             "changed": result.corpus_changed,
             "recorded": result.corpus_recorded,
+            "diverged": result.corpus_diverged,
         },
         "failures": [trial_data(run) for run in result.failures],
         "warnings": [trial_data(run) for run in result.warnings],
@@ -122,3 +133,23 @@ def render_divergences(result: Trial, limit: int = 3) -> str:
     if result.diverged or result.unused_decisions:
         lines.append("  This run cannot confirm the recorded schedule. Re-fuzz the current code.")
     return "\n".join(lines)
+
+
+def shrink_data(result: ShrinkResult) -> dict[str, Any]:
+    return {
+        "original": result.original,
+        "minimal": result.minimal,
+        "original_task_ids": result.original_task_ids,
+        "task_ids": result.minimal_task_ids,
+        "original_deviations": result.original_deviations,
+        "minimal_deviations": result.minimal_deviations,
+        "reduction": result.reduction,
+        "finding": finding_data(result.finding),
+        "replays": result.replays,
+        "elapsed": result.elapsed,
+        "hit_budget": result.hit_budget,
+        "verified": result.verified,
+        "cache_hits": result.cache_hits,
+        "baseline": trial_data(result.baseline) if result.baseline is not None else None,
+        "final": trial_data(result.final_trial),
+    }

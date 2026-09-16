@@ -33,6 +33,10 @@ class InvariantOracle(OracleBase):
         self._warned.clear()
 
     def on_step(self, ctx: RunContext, step: Step) -> Finding | None:
+        return self.check(ctx, step.location)
+
+    def check(self, ctx: RunContext, location: str | None) -> Finding | None:
+        """Compact execution needs the user site, but does not need a Step object."""
         warning = None
         for index, inv in enumerate(self._invariants):
             try:
@@ -47,7 +51,7 @@ class InvariantOracle(OracleBase):
                     Severity.FAILURE,
                     f"invariant {inv.name!r} raised {type(error).__name__}: {error}",
                     step=ctx.step,
-                    site=failure_site(error) or step.location,
+                    site=failure_site(error) or location,
                 )
             if held:
                 continue
@@ -63,7 +67,7 @@ class InvariantOracle(OracleBase):
                 f"invariant {inv.name!r} violated",
                 detail,
                 ctx.step,
-                step.location,
+                location,
             )
             if inv.severity is Severity.FAILURE:
                 return finding

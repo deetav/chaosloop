@@ -16,9 +16,10 @@ import pytest
 
 from . import __version__
 from .cli.main import _checks
-from .fuzz import _failure_findings, fuzz
+from .fuzz import fuzz
 from .runner import Trial, trial
 from .schedulers import Fifo, Random, Replay
+from .shrink import failure_findings as _failure_findings
 
 
 class ChaosFixtureWarning(UserWarning):
