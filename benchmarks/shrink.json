@@ -1,0 +1,187 @@
+{
+  "python": "3.13.15",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "seeds": 50,
+  "rows": [
+    {
+      "bug": "b01",
+      "failures": 24,
+      "before": 2.2083333333333335,
+      "after": 1,
+      "steps_before": 6.458333333333333,
+      "steps_after": 6,
+      "prefix_after": 2.8333333333333335,
+      "replays": 8.916666666666666,
+      "seconds": 0.002196981045320475
+    },
+    {
+      "bug": "b02",
+      "failures": 24,
+      "before": 2.5416666666666665,
+      "after": 1,
+      "steps_before": 10,
+      "steps_after": 10,
+      "prefix_after": 2.8333333333333335,
+      "replays": 9.791666666666666,
+      "seconds": 0.002950597248855047
+    },
+    {
+      "bug": "b03",
+      "failures": 50,
+      "before": 0,
+      "after": 0,
+      "steps_before": 1,
+      "steps_after": 1,
+      "prefix_after": 0,
+      "replays": 3,
+      "seconds": 0.000572149995714426
+    },
+    {
+      "bug": "b04",
+      "failures": 10,
+      "before": 2,
+      "after": 2,
+      "steps_before": 5,
+      "steps_after": 5,
+      "prefix_after": 3,
+      "replays": 8,
+      "seconds": 0.002110266691306606
+    },
+    {
+      "bug": "b05",
+      "failures": 7,
+      "before": 3.142857142857143,
+      "after": 2.4285714285714284,
+      "steps_before": 10.571428571428571,
+      "steps_after": 10.571428571428571,
+      "prefix_after": 8.142857142857142,
+      "replays": 17.285714285714285,
+      "seconds": 0.005298850991364036
+    },
+    {
+      "bug": "b06",
+      "failures": 50,
+      "before": 0,
+      "after": 0,
+      "steps_before": 4,
+      "steps_after": 4,
+      "prefix_after": 0,
+      "replays": 3,
+      "seconds": 0.0007734833529684693
+    },
+    {
+      "bug": "b07",
+      "failures": 12,
+      "before": 1.5,
+      "after": 1,
+      "steps_before": 5,
+      "steps_after": 5,
+      "prefix_after": 3,
+      "replays": 8,
+      "seconds": 0.0018669688433874398
+    },
+    {
+      "bug": "b08",
+      "failures": 23,
+      "before": 1.391304347826087,
+      "after": 1,
+      "steps_before": 6.391304347826087,
+      "steps_after": 6,
+      "prefix_after": 2.869565217391304,
+      "replays": 7.6521739130434785,
+      "seconds": 0.0019243407473170562
+    },
+    {
+      "bug": "b09",
+      "failures": 12,
+      "before": 2.1666666666666665,
+      "after": 1.25,
+      "steps_before": 9.75,
+      "steps_after": 9.75,
+      "prefix_after": 5.75,
+      "replays": 11.833333333333334,
+      "seconds": 0.0032057118320760005
+    },
+    {
+      "bug": "b10",
+      "failures": 5,
+      "before": 3,
+      "after": 1.6,
+      "steps_before": 10,
+      "steps_after": 10,
+      "prefix_after": 3.2,
+      "replays": 10,
+      "seconds": 0.003282866603694856
+    },
+    {
+      "bug": "b11",
+      "failures": 18,
+      "before": 4.555555555555555,
+      "after": 1.3888888888888888,
+      "steps_before": 13,
+      "steps_after": 12.666666666666666,
+      "prefix_after": 4.222222222222222,
+      "replays": 15.11111111111111,
+      "seconds": 0.005707687659499546
+    },
+    {
+      "bug": "b12",
+      "failures": 7,
+      "before": 5.142857142857143,
+      "after": 2.857142857142857,
+      "steps_before": 10,
+      "steps_after": 10,
+      "prefix_after": 5.714285714285714,
+      "replays": 17.428571428571427,
+      "seconds": 0.005876190569584391
+    },
+    {
+      "bug": "b13",
+      "failures": 13,
+      "before": 1.7692307692307692,
+      "after": 1,
+      "steps_before": 6,
+      "steps_after": 6,
+      "prefix_after": 2.6153846153846154,
+      "replays": 8.153846153846153,
+      "seconds": 0.0022818910656496882
+    },
+    {
+      "bug": "b14",
+      "failures": 13,
+      "before": 1.7692307692307692,
+      "after": 1,
+      "steps_before": 6,
+      "steps_after": 6,
+      "prefix_after": 2.6153846153846154,
+      "replays": 8.153846153846153,
+      "seconds": 0.002456958289258182
+    },
+    {
+      "bug": "b15",
+      "failures": 28,
+      "before": 3.607142857142857,
+      "after": 1,
+      "steps_before": 12,
+      "steps_after": 12,
+      "prefix_after": 2.7142857142857144,
+      "replays": 11.035714285714286,
+      "seconds": 0.004229674182300057
+    }
+  ],
+  "failures": 296,
+  "median_before": 2.0,
+  "median_after": 1.0,
+  "median_replays": 8.0,
+  "median_seconds": 0.002009187504881993,
+  "large": {
+    "steps": 10006,
+    "before": 3,
+    "after": 1,
+    "prefix": 10002,
+    "executed_steps": 10006,
+    "replays": 27,
+    "seconds": 2.2892117080045864,
+    "verified": true
+  }
+}

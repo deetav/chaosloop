@@ -1,32 +1,14 @@
-A plain assert at the end of the scenario catches nothing because by then the requirement is satisfied.
+# Replay performance
 
-```text
-stock asyncio + final assertion: passed
-FIFO + per step invariant:
-FAILED  seed=None  scheduler=Fifo
-  [failure] invariant: invariant 'money conserved' violated
-    at b03_transfer.py:23
-balances=[400, 500], total=900
-  0 deviations from the default schedule, 1 steps
-  virtual time=0; digest=8879455c6e8eb085
+Each sample runs 200 identity replays of the same 202-step scenario.
+Five samples alternate full and compact order, with the same default oracles and scenario state.
+The figures below are medians of those sample times; this is a microbenchmark, not a universal gain.
 
- step      vtime  task          action                                    at
-    1      0.000  task-1        task_step<task-1>                         runner.py:208
-0 deviations from default in 1 steps
+| Mode | Median batch seconds | Per replay milliseconds |
+| --- | ---: | ---: |
+| Before: full Step history | 0.5087 | 2.543 |
+| After: compact structural rows | 0.3400 | 1.700 |
 
-Reproduce: chaosloop.trial(scenario, scheduler=chaosloop.Replay([0], strict=True), max_steps=1000000, max_time=None)
-Use the same scenario, inputs, code, Python, and oracle/invariant configuration.
-chaosloop: benchmarks.bugs.b03_transfer.scenario
-  corpus: 0 replayed; 0 still fail; 0 no longer reproduce (forgotten); 0 changed
-  200 fresh trials; 200 failing trials in 1 distinct buckets; stopped=trials
+Observed speedup: **1.50×**. Raw samples are in `benchmarks/performance.json`.
+Digest, decisions, executed step count and findings have separate parity tests across all 15 bugs × 50 seeds.
 
---- Bug 1: 200 occurrences; 0 deviations ---
-  invariant: invariant 'money conserved' violated
-  at b03_transfer.py:23; seed=0; steps=1
-balances=[400, 500], total=900
- step      vtime  task          action                                    at
-    1      0.000  task-1        task_step<task-1>                         runner.py:208
-0 deviations from default in 1 steps
-  Reproduce: chaosloop.trial(scenario, seed=0, max_steps=1000000, max_time=None)
-  Also found by: 1, 2, 3, 4, 5 (194 more)
-```
