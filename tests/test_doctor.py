@@ -5,6 +5,7 @@ import json
 import os
 import random
 import subprocess
+import sys
 import time
 import uuid
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ import pytest
 from chaosloop.cli import doctor
 from chaosloop.cli.main import main
 from chaosloop.cli.specs import load_scenario
+from chaosloop.compat import SUPPORTED_VERSIONS
 
 
 @pytest.mark.parametrize("interrupt", [False, True])
@@ -68,19 +70,41 @@ def test_environment_reports_bad_layout_and_policy(monkeypatch):
 
 def test_environment_without_spec(monkeypatch, capsys):
     monkeypatch.delenv("PYTHONHASHSEED", raising=False)
-    assert main(["doctor", "--json"]) == 0
+    supported = (
+        sys.implementation.name == "cpython"
+        and sys.version_info[:2] in SUPPORTED_VERSIONS
+    )
+    assert main(["doctor", "--json"]) == (0 if supported else 1)
     rows = json.loads(capsys.readouterr().out)["checks"]
-    assert [row["check"] for row in rows] == ["python", "internals", "hash_seed", "policy"]
+    assert [row["check"] for row in rows] == [
+        "python", "internals", "hash_seed", "policy"
+    ]
+    assert rows[0]["ok"] is supported
     assert rows[2]["warning"]
 
 
 
 def test_clean_scenario_including_actual_hash_seed_workers(capsys):
-    assert main(["doctor", "tests.cli_scenarios:clean", "--json"]) == 0
+    supported = (
+        sys.implementation.name == "cpython"
+        and sys.version_info[:2] in SUPPORTED_VERSIONS
+    )
+    assert main([
+        "doctor",
+        "tests.cli_scenarios:clean",
+        "--json",
+    ]) == (0 if supported else 1)
     checks = json.loads(capsys.readouterr().out)["checks"]
-    assert all(check["ok"] or check["warning"] for check in checks)
-    assert next(check for check in checks if check["check"] == "hazards")["ok"]
+    assert next(c for c in checks if c["check"] == "python")["ok"] is supported
+    assert all(
+        check["ok"] or check["warning"]
+        for check in checks
+        if check["check"] != "python"
+    )
 
+    assert next(
+        c for c in checks if c["check"] == "hazards"
+    )["ok"]
 
 def test_clock_use_reports_hazard_next_to_repeatability(monkeypatch, capsys):
     monkeypatch.setattr(
