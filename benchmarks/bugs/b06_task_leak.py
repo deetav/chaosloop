@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b06"
 DESCRIPTION = "Background task leaked on a handled error path"
-DEPTH = 0
+DEPTH = 0 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "task_leak"
 
 

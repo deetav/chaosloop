@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b15"
 DESCRIPTION = "Shutdown misses a child created after its task snapshot"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "task_leak"
 
 

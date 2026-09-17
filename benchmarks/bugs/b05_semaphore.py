@@ -7,7 +7,7 @@ import chaosloop
 
 BUG_ID = "b05"
 DESCRIPTION = "A newcomer steals a permit before an already-woken waiter resumes"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 class BrokenSemaphore:

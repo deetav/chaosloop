@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b02"
 DESCRIPTION = "Two loads race for the same cache key"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "unhandled_exception"
 
 

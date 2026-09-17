@@ -7,7 +7,7 @@ from benchmarks.bugs._primitives import BuggyPool
 
 BUG_ID = "b14"
 DESCRIPTION = "A pool checks out one connection to two borrowers"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 

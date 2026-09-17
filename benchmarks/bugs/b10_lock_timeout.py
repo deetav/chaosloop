@@ -7,7 +7,7 @@ from benchmarks.bugs._primitives import BuggyLock
 
 BUG_ID = "b10"
 DESCRIPTION = "Timed-out lock waiter loses the ownership handoff"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "deadlock"
 
 

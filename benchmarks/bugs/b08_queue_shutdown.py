@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID= "b08"
 DESCRIPTION = "consumer waits after the final queue item"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "deadlock"
 
 async def scenario() -> None:

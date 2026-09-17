@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b12"
 DESCRIPTION = "Three tasks acquire A->B, B->C, C->A"
-DEPTH = 2
+DEPTH = 2 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "deadlock"
 
 

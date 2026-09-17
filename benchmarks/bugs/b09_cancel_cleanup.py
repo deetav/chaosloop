@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b09"
 DESCRIPTION = "Cancellation interrupts resource release"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 

@@ -1,0 +1,199 @@
+{
+  "python": "3.13.15",
+  "seeds": 500,
+  "shrink_max_replays": 2000,
+  "shrink_max_seconds": 10,
+  "metric": "observed_fifo_deviations",
+  "results": [
+    {
+      "bug_id": "b01",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 184,
+      "distribution": {
+        "1": 184
+      },
+      "min_steps": 6,
+      "signature_samples": 184,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b02",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 184,
+      "distribution": {
+        "1": 184
+      },
+      "min_steps": 10,
+      "signature_samples": 184,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b03",
+      "declared": 0,
+      "empirical": 0,
+      "samples": 500,
+      "distribution": {
+        "0": 500
+      },
+      "min_steps": 1,
+      "signature_samples": 500,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b04",
+      "declared": 2,
+      "empirical": 2,
+      "samples": 72,
+      "distribution": {
+        "2": 72
+      },
+      "min_steps": 5,
+      "signature_samples": 72,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b05",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 130,
+      "distribution": {
+        "1": 49,
+        "2": 51,
+        "3": 9,
+        "4": 21
+      },
+      "min_steps": 11,
+      "signature_samples": 130,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b06",
+      "declared": 0,
+      "empirical": 0,
+      "samples": 500,
+      "distribution": {
+        "0": 500
+      },
+      "min_steps": 4,
+      "signature_samples": 500,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b07",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 133,
+      "distribution": {
+        "1": 133
+      },
+      "min_steps": 5,
+      "signature_samples": 133,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b08",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 177,
+      "distribution": {
+        "1": 177
+      },
+      "min_steps": 6,
+      "signature_samples": 177,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b09",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 119,
+      "distribution": {
+        "1": 92,
+        "2": 27
+      },
+      "min_steps": 10,
+      "signature_samples": 119,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b10",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 36,
+      "distribution": {
+        "1": 14,
+        "2": 22
+      },
+      "min_steps": 10,
+      "signature_samples": 36,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b11",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 218,
+      "distribution": {
+        "1": 165,
+        "2": 53
+      },
+      "min_steps": 9,
+      "signature_samples": 218,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b12",
+      "declared": 2,
+      "empirical": 2,
+      "samples": 67,
+      "distribution": {
+        "2": 37,
+        "3": 19,
+        "4": 5,
+        "5": 6
+      },
+      "min_steps": 10,
+      "signature_samples": 67,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b13",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 79,
+      "distribution": {
+        "1": 79
+      },
+      "min_steps": 6,
+      "signature_samples": 79,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b14",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 79,
+      "distribution": {
+        "1": 79
+      },
+      "min_steps": 6,
+      "signature_samples": 79,
+      "unverified": 0
+    },
+    {
+      "bug_id": "b15",
+      "declared": 1,
+      "empirical": 1,
+      "samples": 246,
+      "distribution": {
+        "1": 242,
+        "7": 4
+      },
+      "min_steps": 12,
+      "signature_samples": 246,
+      "unverified": 0
+    }
+  ]
+}

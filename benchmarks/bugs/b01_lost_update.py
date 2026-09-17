@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b01"
 DESCRIPTION = "Lost update across an await"
-DEPTH = 1  # Best observed deviation count in results.md; not a proven minimum.
+DEPTH = 1  # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 

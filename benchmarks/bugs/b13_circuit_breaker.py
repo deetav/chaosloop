@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b13"
 DESCRIPTION = "Stale HALF_OPEN state admits two recovery probes"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 

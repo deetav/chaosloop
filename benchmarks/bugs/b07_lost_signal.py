@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b07"
 DESCRIPTION = "An Event pulse is lost before subscription"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "deadlock"
 
 

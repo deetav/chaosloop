@@ -6,7 +6,7 @@ import chaosloop
 
 BUG_ID = "b04"
 DESCRIPTION = "Opposite lock ordering under a particular interleaving"
-DEPTH = 2
+DEPTH = 2 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "deadlock"
 
 async def scenario() -> None:

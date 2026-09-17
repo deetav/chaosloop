@@ -7,7 +7,7 @@ from benchmarks.bugs._primitives import SharedBackoff
 
 BUG_ID = "b11"
 DESCRIPTION = "Independent retries multiply one shared backoff"
-DEPTH = 1
+DEPTH = 1 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "time_budget"
 MAX_TIME = 60.0
 

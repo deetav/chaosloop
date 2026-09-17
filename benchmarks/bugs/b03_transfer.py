@@ -8,7 +8,7 @@ import chaosloop
 
 BUG_ID = "b03"
 DESCRIPTION = "Money disappears temporarily between debit and credit"
-DEPTH = 0
+DEPTH = 0 # Observed FIFO deviation: 500seeds, NOT PCT DEPTH
 EXPECTED_ORACLE = "invariant"
 
 async def scenario(*, check: bool = True) -> None:
