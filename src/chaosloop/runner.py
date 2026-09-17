@@ -34,6 +34,7 @@ from .oracles.outcome import CONTROL_ERRORS
 from .runtime import ErrorInfo, TaskInfo, TraceView
 from .schedulers.base import Scheduler
 from .schedulers.fifo import Fifo
+from .schedulers.pct import Pct
 from .schedulers.random_ import Random
 from .schedulers.replay import Divergence, Replay
 from .trace import Step, Trace
@@ -271,7 +272,7 @@ def _execute(
         raise ValueError("max_steps must be a positive integer")
     clock = VirtualClock(max_time=max_time)
     selected = _build_oracles(oracles, invariants)
-    actual_seed = strategy.seed if isinstance(strategy, Random) else None
+    actual_seed = strategy.seed if isinstance(strategy, (Random, Pct)) else None
     if type(record_trace) is not bool:
         raise TypeError("record_trace must be boolean")
     full_hooks = record_trace or any(

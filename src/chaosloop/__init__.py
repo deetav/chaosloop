@@ -14,10 +14,11 @@ from .exceptions import (
 )
 from .runner import Trial, run, trial
 from .schedulers import Candidate, Divergence, Fifo, Random, Replay, Scheduler, StepEvent
+from .schedulers.pct import Pct
 from .shrink import ShrinkBudget, ShrinkError, ShrinkResult, shrink
 from .trace import Step, Trace, Tracer
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Candidate",
@@ -105,4 +106,8 @@ __all__ += [
     "diff_traces",
     "render_diff",
     "shrink",
+]
+
+__all__ += [
+    "Pct"
 ]

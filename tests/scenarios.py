@@ -43,3 +43,52 @@ async def leftover_scenario() -> list[str]:
     return events
 
 
+
+async def pair() -> str:
+    order = []
+
+    async def append(letter):
+        order.append(letter)
+
+    await asyncio.gather(append("A"), append("B"))
+    return "".join(order)
+
+
+async def one_deviation() -> None:
+    assert await pair() != "BA", "reversed pair"
+
+
+async def two_deviations() -> None:
+    first = await pair()
+    second = await pair()
+    # Each round joins before starting the next. Reversing BOTH pairs requires
+    # an independent non-FIFO task choice in each round.
+    assert (first, second) != ("BA", "BA"), "both pairs reversed"
+
+
+async def clean() -> None:
+    await pair()
+
+
+async def empty() -> None:
+    pass
+
+
+async def branching() -> str:
+    """Only a non-FIFO path creates the third task"""
+    seen = []
+
+    async def a():
+        seen.append("A")
+
+    async def child():
+        seen.append("C")
+
+    async def b():
+        if not seen:
+            await asyncio.create_task(child())
+        seen.append("B")
+
+    await asyncio.gather(a(), b())
+    return "".join(seen)
+
